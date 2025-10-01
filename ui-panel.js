@@ -185,9 +185,9 @@ export class UIPanel {
     this.heightValue = document.createElement('input');
     this.heightValue.type = 'number';
     this.heightValue.value = 0;
-    this.heightValue.min = -50;
-    this.heightValue.max = 50;
-    this.heightValue.step = 1;
+    this.heightValue.min = -10;  // limit per spec
+    this.heightValue.max = 10;
+    this.heightValue.step = 0.2; // increments of 0.2
 
     const downBtn = document.createElement('button');
     downBtn.textContent = 'Down';
@@ -202,32 +202,6 @@ export class UIPanel {
     hint.textContent = 'Pin ON: tap to green-highlight tiles. Pin OFF: tap to set tile height.';
 
     row2.append(hvLabel, this.heightValue, downBtn, upBtn);
-
-    wrap.append(row1, row2, hint);
-    return wrap;
-  }
-
-  _createSettingsTabContent() {
-    const wrap = document.createElement('div');
-    wrap.className = 'panel-col';
-
-    const row1 = document.createElement('div');
-    row1.className = 'panel-row';
-    const saveBtn = document.createElement('button');
-    saveBtn.className = 'save-btn';
-    saveBtn.textContent = 'Save Project…';
-    row1.appendChild(saveBtn);
-
-    const row2 = document.createElement('div');
-    row2.className = 'panel-row';
-    const loadBtn = document.createElement('button');
-    loadBtn.className = 'load-btn';
-    loadBtn.textContent = 'Load Project…';
-    row2.appendChild(loadBtn);
-
-    const hint = document.createElement('div');
-    hint.className = 'hint';
-    hint.textContent = 'Saves include grid size, character position, camera view, view and paint.';
 
     wrap.append(row1, row2, hint);
     return wrap;
@@ -259,6 +233,12 @@ export class UIPanel {
   }
 
   _addEventListeners() {
+    // helper: clamp & snap to nearest 0.2
+    const snap02 = (v) => {
+      const snapped = Math.round(v * 5) / 5; // 1/0.2 = 5
+      return Math.max(-10, Math.min(10, snapped));
+    };
+
     // Switch tabs
     this.panelElement.querySelector('.tabs-container').addEventListener('click', (e) => {
       const clicked = e.target.closest('.tab');
@@ -342,13 +322,14 @@ export class UIPanel {
         return;
       }
 
-      // Height up/down
+      // Height up/down — now ±0.2
       const up = e.target.closest('.height-up');
       const dn = e.target.closest('.height-down');
       if (up || dn) {
-        const v = parseInt(this.heightValue?.value || '0', 10);
-        const next = Math.max(-50, Math.min(50, v + (up ? 1 : -1)));
-        if (this.heightValue) this.heightValue.value = next;
+        const raw = parseFloat(this.heightValue?.value ?? '0') || 0;
+        const delta = up ? 0.2 : -0.2;
+        const next = snap02(raw + delta);
+        if (this.heightValue) this.heightValue.value = next.toFixed(1).replace(/\.0$/, '.0'); // clean display (e.g. 0.2)
         const evt = new CustomEvent('height-set', { detail: { value: next } });
         this.panelElement.dispatchEvent(evt);
         return;
@@ -391,10 +372,11 @@ export class UIPanel {
         return;
       }
 
-      // Height numeric input changed
+      // Height numeric input changed — snap to 0.2
       if (e.target === this.heightValue) {
-        const v = Math.max(-50, Math.min(50, parseInt(this.heightValue.value || '0', 10)));
-        this.heightValue.value = v;
+        const raw = parseFloat(this.heightValue.value || '0') || 0;
+        const v = snap02(raw);
+        this.heightValue.value = v.toFixed(1).replace(/\.0$/, '.0');
         const evt = new CustomEvent('height-set', { detail: { value: v } });
         this.panelElement.dispatchEvent(evt);
         return;
@@ -411,7 +393,7 @@ export class UIPanel {
         try {
           const data = JSON.parse(reader.result);
           const evt = new CustomEvent('load-project-data', { detail: { data, filename: file.name } });
-        this.panelElement.dispatchEvent(evt);
+          this.panelElement.dispatchEvent(evt);
         } catch {
           alert('Invalid save file (not JSON).');
         }
@@ -448,7 +430,7 @@ export class UIPanel {
       .panel-col { display: flex; flex-direction: column; gap: 10px; }
       .panel-row label { font-weight: 500; color: #ccc; }
       .panel-row input[type="number"] {
-        width: 64px; background: #111; border: 1px solid #444; color: #fff;
+        width: 80px; background: #111; border: 1px solid #444; color: #fff;
         padding: 8px; border-radius: 2px; text-align: center;
       }
       .panel-row span { color: #777; font-weight: bold; }
@@ -469,8 +451,7 @@ export class UIPanel {
         box-shadow: inset 0 0 0 1px rgba(255,255,255,0.1);
       }
       .slider:before {
-        position: absolute; content: "";
-        height: 18px; width: 18px; left: 3px; top: 3px;
+        position: absolute; content: ""; height: 18px; width: 18px; left: 3px; top: 3px;
         background: #fff; border-radius: 50%; transition: .2s;
       }
       input:checked + .slider { background: #00aaff; }
@@ -485,7 +466,7 @@ export class UIPanel {
         min-width: 84px; max-width: 84px; border: 1px solid rgba(255,255,255,0.12);
         background: rgba(255,255,255,0.04); border-radius: 8px; padding: 8px;
         display: flex; flex-direction: column; align-items: center; gap: 6px;
-        cursor: pointer;
+        cursor: pointer.
       }
       .terrain-item .thumb {
         width: 64px; height: 64px; border-radius: 6px; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.25);
