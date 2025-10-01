@@ -22,6 +22,9 @@ window.onload = function () {
   markerGroup.name = 'MarkerLayer';
   const markedTiles = new Map(); // key "x,y" -> mesh
 
+  // Current terrain selection (from Terrain tab)
+  let currentTerrain = 'sand';
+
   // Scene
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x111318);
@@ -93,16 +96,20 @@ window.onload = function () {
     regenerateWorld(width, height);
   });
 
+  // Terrain selection handler
+  uiPanel.panelElement.addEventListener('terrain-select', (e) => {
+    currentTerrain = e.detail?.type || 'sand';
+    // (Painting tools will use currentTerrain later)
+    // console.log('Selected terrain:', currentTerrain);
+  });
+
   // ===== Marker Mode drives Freeze =====
   uiPanel.panelElement.addEventListener('marker-toggle-request', (e) => {
     const { wantOn } = e.detail || {};
     if (wantOn) {
-      // Enable marker mode and force-freeze ON (and lock the freeze toggle)
       markerMode = true;
       setFreeze(true, /*disableUI*/ true);
     } else {
-      // Disable marker mode, lock current markers as non-walkable,
-      // and force-freeze OFF (re-enable the freeze toggle)
       markerMode = false;
       controller.applyNonWalkables([...markedTiles.keys()]);
       setFreeze(false, /*disableUI*/ false);
@@ -215,7 +222,7 @@ window.onload = function () {
     const markers = [...markedTiles.keys()].map(k => k.split(',').map(Number));
 
     return {
-      version: 3,
+      version: 4,
       timestamp: Date.now(),
       grid: { width: gridWidth, height: gridHeight },
       character: { tx: charTx, tz: charTz },
@@ -227,116 +234,10 @@ window.onload = function () {
         freezeTapToMove: !!freezeTapToMove,
         markerMode: !!markerMode
       },
-      markers
+      markers,
+      terrain: { selected: currentTerrain }
     };
   }
 
   function applyProjectData(data) {
-    const w = Math.max(2, Math.min(200, Number(data.grid.width) || 30));
-    const h = Math.max(2, Math.min(200, Number(data.grid.height) || 30));
-    regenerateWorld(w, h);
-
-    // Character
-    const tx = Math.max(0, Math.min(w - 1, Number(data.character?.tx) ?? Math.floor(w / 2)));
-    const tz = Math.max(0, Math.min(h - 1, Number(data.character?.tz) ?? Math.floor(h / 2)));
-    controller.resetTo(tx, tz);
-
-    // Restore markers (but keep Marker Mode OFF after load)
-    markerMode = false;
-    clearAllMarkers();
-    if (Array.isArray(data.markers)) {
-      for (const pair of data.markers) {
-        if (Array.isArray(pair) && pair.length === 2) {
-          const mx = Number(pair[0]), mz = Number(pair[1]);
-          if (Number.isFinite(mx) && Number.isFinite(mz)) addMarker(mx, mz);
-        }
-      }
-      controller.applyNonWalkables([...markedTiles.keys()]);
-    }
-
-    // Restore freeze (Marker Mode stays OFF → freeze toggle enabled)
-    setFreeze(!!data.settings?.freezeTapToMove, /*disableUI*/ false);
-
-    // Camera
-    if (Array.isArray(data.camera?.position) && Array.isArray(data.camera?.target)) {
-      const [cx, cy, cz] = data.camera.position;
-      const [txx, tyy, tzz] = data.camera.target;
-      if ([cx, cy, cz].every(Number.isFinite) && [txx, tyy, tzz].every(Number.isFinite)) {
-        camera.position.set(cx, cy, cz);
-        controls.target.set(txx, tyy, tzz);
-        controls.update();
-      }
-    } else {
-      const center = tileToWorld(tx, tz, w, h);
-      controls.target.copy(center);
-      camera.position.set(center.x + 2, 6, center.z + 8);
-      controls.update();
-    }
-  }
-
-  // -------- Freeze HUD (top-left) --------
-  function addFreezeToggle() {
-    const style = document.createElement('style');
-    style.textContent = `
-      .hud-freeze {
-        position: fixed; top: 12px; left: 12px; z-index: 20;
-        display: flex; align-items: center; gap: 8px;
-        background: rgba(30,32,37,0.85);
-        color: #e8e8ea; padding: 8px 10px;
-        border: 1px solid rgba(255,255,255,0.1);
-        border-radius: 6px; backdrop-filter: blur(8px);
-        -webkit-backdrop-filter: blur(8px);
-        font: 600 12px/1.2 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Inter,sans-serif;
-      }
-      .switch { position: relative; display: inline-block; width: 44px; height: 24px; }
-      .switch input { opacity: 0; width: 0; height: 0; }
-      .slider {
-        position: absolute; cursor: pointer; inset: 0;
-        background: #3a3d46; transition: .2s; border-radius: 999px;
-        box-shadow: inset 0 0 0 1px rgba(255,255,255,0.1);
-      }
-      .slider:before {
-        position: absolute; content: "";
-        height: 18px; width: 18px; left: 3px; top: 3px;
-        background: #fff; border-radius: 50%; transition: .2s;
-      }
-      input:checked + .slider { background: #00aaff; }
-      input:checked + .slider:before { transform: translateX(20px); }
-      input:disabled + .slider { filter: grayscale(0.3); opacity: 0.65; cursor: not-allowed; }
-    `;
-    document.head.appendChild(style);
-
-    const hud = document.createElement('div');
-    hud.className = 'hud-freeze';
-    hud.innerHTML = `
-      <label class="switch" title="Freeze tap-to-move">
-        <input type="checkbox" id="freezeMoveToggle">
-        <span class="slider"></span>
-      </label>
-      <span>Freeze tap-to-move</span>
-    `;
-    document.body.appendChild(hud);
-
-    freezeCheckboxEl = hud.querySelector('#freezeMoveToggle');
-    freezeCheckboxEl.addEventListener('change', () => {
-      if (markerMode) {
-        // While marking, freeze is locked ON — ignore manual changes
-        freezeCheckboxEl.checked = true;
-        return;
-      }
-      freezeTapToMove = freezeCheckboxEl.checked;
-    });
-  }
-
-  // Helper to set + (optionally) lock the freeze UI
-  function setFreeze(on, disableUI) {
-    freezeTapToMove = !!on;
-    if (freezeCheckboxEl) {
-      freezeCheckboxEl.checked = freezeTapToMove;
-      freezeCheckboxEl.disabled = !!disableUI;
-      freezeCheckboxEl.parentElement.title = disableUI
-        ? 'Freeze is locked ON while Marker Mode is active'
-        : 'Freeze tap-to-move';
-    }
-  }
-};
+   
