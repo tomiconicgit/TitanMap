@@ -9,7 +9,9 @@ export class Terrain {
     this.showOutlines = false;
     this.edgesMesh = null;
 
-    // scratch
+    this.width = 0;
+    this.height = 0;
+
     this._raycaster = new THREE.Raycaster();
     this._ndc = new THREE.Vector2();
   }
@@ -31,16 +33,27 @@ export class Terrain {
       this.edgesMesh = null;
     }
 
-    // Size == tiles, Segments == tiles
+    // Indexed geometry so height tool keeps shared vertices across tiles
     const geo = new THREE.PlaneGeometry(this.width, this.height, this.width, this.height);
+
+    // Build per-vertex color attribute (default mid gray)
+    const vertCount = geo.attributes.position.count;
+    const colors = new Float32Array(vertCount * 3);
+    for (let i = 0; i < vertCount; i++) {
+      colors[i * 3 + 0] = 0.47;
+      colors[i * 3 + 1] = 0.47;
+      colors[i * 3 + 2] = 0.47;
+    }
+    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
     const mat = new THREE.MeshStandardMaterial({
-      color: 0x777777,
+      vertexColors: true,
       roughness: 0.95,
       metalness: 0.0
     });
 
     this.mesh = new THREE.Mesh(geo, mat);
-    this.mesh.rotation.x = -Math.PI / 2; // XY => XZ, Z becomes world Y
+    this.mesh.rotation.x = -Math.PI / 2;
     this.mesh.receiveShadow = true;
     this.mesh.name = `Terrain_${this.width}x${this.height}`;
     this.scene.add(this.mesh);
@@ -86,25 +99,16 @@ export class Terrain {
     this._raycaster.setFromCamera(this._ndc, camera);
     const hit = this._raycaster.intersectObject(this.mesh, false);
     if (!hit.length) return null;
-    // return world-space point on mesh
     return hit[0].point;
   }
 
-  /**
-   * Sample the current deformed surface height (world Y) at world XZ.
-   * Uses bilinear interpolation of the plane's vertex Z (after deformation).
-   */
   getHeightAt(worldX, worldZ) {
     if (!this.mesh) return 0;
     const pos = this.mesh.geometry.attributes.position;
     const w = this.width, h = this.height;
 
-    // Convert worldX/worldZ to local tile-space [0..w]x[0..h]
-    // Plane is centered; tiles are 1x1.
     let lx = worldX + w / 2;
     let lz = worldZ + h / 2;
-
-    // Clamp inside the mesh
     lx = Math.min(Math.max(lx, 0), w - 1e-6);
     lz = Math.min(Math.max(lz, 0), h - 1e-6);
 
@@ -113,18 +117,41 @@ export class Terrain {
     const fx = lx - tx;
     const fz = lz - tz;
 
-    // Vertex indices: (vx, vz) => vz*(w+1) + vx
     const idx = (vx, vz) => vz * (w + 1) + vx;
+    const v00 = pos.getZ(idx(tx,     tz    ));
+    const v10 = pos.getZ(idx(tx + 1, tz    ));
+    const v01 = pos.getZ(idx(tx,     tz + 1));
+    const v11 = pos.getZ(idx(tx + 1, tz + 1));
 
-    const v00 = pos.getZ(idx(tx,     tz    )); // top-left
-    const v10 = pos.getZ(idx(tx + 1, tz    )); // top-right
-    const v01 = pos.getZ(idx(tx,     tz + 1)); // bottom-left
-    const v11 = pos.getZ(idx(tx + 1, tz + 1)); // bottom-right
-
-    // Bilinear interpolation inside the 1x1 tile
     const a = v00 * (1 - fx) + v10 * fx;
     const b = v01 * (1 - fx) + v11 * fx;
-    const height = a * (1 - fz) + b * fz;
-    return height;
+    return a * (1 - fz) + b * fz;
+  }
+
+  /** Paints a single tile (tx,tz) by writing vertex colors of its 4 shared corners. */
+  paintTileColor(tx, tz, colorAtCorner /* (fx,fz)=>THREE.Color */) {
+    if (!this.mesh) return;
+    if (tx < 0 || tz < 0 || tx >= this.width || tz >= this.height) return;
+
+    const w = this.width;
+    const colors = this.mesh.geometry.attributes.color;
+
+    // vertex indices for this tile’s 4 corners in indexed geometry
+    const v_tl = tz       * (w + 1) + tx;
+    const v_tr = tz       * (w + 1) + (tx + 1);
+    const v_bl = (tz + 1) * (w + 1) + tx;
+    const v_br = (tz + 1) * (w + 1) + (tx + 1);
+
+    const c_tl = colorAtCorner(0, 0);
+    const c_tr = colorAtCorner(1, 0);
+    const c_bl = colorAtCorner(0, 1);
+    const c_br = colorAtCorner(1, 1);
+
+    colors.setXYZ(v_tl, c_tl.r, c_tl.g, c_tl.b);
+    colors.setXYZ(v_tr, c_tr.r, c_tr.g, c_tr.b);
+    colors.setXYZ(v_bl, c_bl.r, c_bl.g, c_bl.b);
+    colors.setXYZ(v_br, c_br.r, c_br.g, c_br.b);
+
+    colors.needsUpdate = true;
   }
 }
