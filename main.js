@@ -49,6 +49,10 @@ window.onload = function () {
       })
     );
     groundPlane.rotation.x = -Math.PI / 2;
+    groundPlane.position.set(0, 0, 0);
+    groundPlane.name = 'TapPlane';
+    // Important: make sure it’s pickable even if out of view frustum
+    groundPlane.frustumCulled = false;
     scene.add(groundPlane);
 
     controller.updateGridSize(width, height);
@@ -91,6 +95,7 @@ window.onload = function () {
     controller.moveTo(tx, tz);
   });
 
+  // Camera follows by translating with the character’s movement delta
   const lastCharPos = new THREE.Vector3();
   const delta = new THREE.Vector3();
 
