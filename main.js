@@ -12,12 +12,15 @@ window.onload = function () {
   let gridWidth, gridHeight;
   let gridGroup, groundPlane;
 
-  // freeze toggle
+  // Freeze toggle (top-left HUD)
   let freezeTapToMove = false;
   let freezeCheckboxEl = null;
 
-  // HUD toggle
-  addFreezeToggle();
+  // Marker Mode
+  let markerMode = false;
+  const markerGroup = new THREE.Group();
+  markerGroup.name = 'MarkerLayer';
+  const markedTiles = new Map(); // key "x,y" -> mesh
 
   // Scene
   const scene = new THREE.Scene();
@@ -26,6 +29,7 @@ window.onload = function () {
   const dirLight = new THREE.DirectionalLight(0xffffff, 1.1);
   dirLight.position.set(5, 10, 7.5);
   scene.add(dirLight);
+  scene.add(markerGroup);
 
   // Character & controller
   const character = createCharacter();
@@ -65,6 +69,9 @@ window.onload = function () {
     groundPlane.frustumCulled = false;
     scene.add(groundPlane);
 
+    // Clear markers when grid changes
+    clearAllMarkers();
+
     controller.updateGridSize(width, height);
 
     const cTx = Math.floor(width / 2);
@@ -86,14 +93,29 @@ window.onload = function () {
     regenerateWorld(width, height);
   });
 
-  // SAVE handler
+  // ===== Marker Mode drives Freeze =====
+  uiPanel.panelElement.addEventListener('marker-toggle-request', (e) => {
+    const { wantOn } = e.detail || {};
+    if (wantOn) {
+      // Enable marker mode and force-freeze ON (and lock the freeze toggle)
+      markerMode = true;
+      setFreeze(true, /*disableUI*/ true);
+    } else {
+      // Disable marker mode, lock current markers as non-walkable,
+      // and force-freeze OFF (re-enable the freeze toggle)
+      markerMode = false;
+      controller.applyNonWalkables([...markedTiles.keys()]);
+      setFreeze(false, /*disableUI*/ false);
+    }
+  });
+
+  // SAVE (includes markers)
   uiPanel.panelElement.addEventListener('save-project', (e) => {
     const { filename } = e.detail || {};
     const data = getProjectData();
     const json = JSON.stringify(data, null, 2);
     const blob = new Blob([json], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
-
     const a = document.createElement('a');
     a.href = url;
     a.download = filename || 'titanmap.json';
@@ -103,29 +125,23 @@ window.onload = function () {
     URL.revokeObjectURL(url);
   });
 
-  // LOAD handler
+  // LOAD
   uiPanel.panelElement.addEventListener('load-project-data', (e) => {
     const { data } = e.detail || {};
-    if (!data || !data.grid) {
-      alert('Invalid save data: missing grid.');
-      return;
-    }
+    if (!data || !data.grid) { alert('Invalid save file.'); return; }
     applyProjectData(data);
   });
 
-  // Tap-to-move with drag filter
+  // Tap/Drag handling
   const raycaster = new THREE.Raycaster();
   const ndc = new THREE.Vector2();
   const downPos = new THREE.Vector2();
   const canvas = viewport.renderer.domElement;
 
   canvas.addEventListener('pointerdown', (e) => { downPos.set(e.clientX, e.clientY); });
-
   canvas.addEventListener('pointerup', (e) => {
-    if (freezeTapToMove) return;
-
     const up = new THREE.Vector2(e.clientX, e.clientY);
-    if (downPos.distanceTo(up) > 5) return;
+    if (downPos.distanceTo(up) > 5) return; // ignore drags
 
     const rect = canvas.getBoundingClientRect();
     ndc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
@@ -136,6 +152,10 @@ window.onload = function () {
     if (hit.length === 0) return;
 
     const { tx, tz } = worldToTile(hit[0].point, gridWidth, gridHeight);
+
+    if (markerMode) { addMarker(tx, tz); return; }
+    if (freezeTapToMove) return;
+
     controller.moveTo(tx, tz);
   });
 
@@ -155,14 +175,47 @@ window.onload = function () {
   };
 
   // Boot
+  addFreezeToggle();
   regenerateWorld(30, 30);
+
+  // -------- Marker helpers --------
+  function tileKey(x, y) { return `${x},${y}`; }
+
+  function addMarker(tx, tz) {
+    if (tx < 0 || tx >= gridWidth || tz < 0 || tz >= gridHeight) return;
+    const key = tileKey(tx, tz);
+    if (markedTiles.has(key)) return;
+
+    const geo = new THREE.PlaneGeometry(1, 1);
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xff3333, transparent: true, opacity: 0.6, side: THREE.DoubleSide
+    });
+    const m = new THREE.Mesh(geo, mat);
+    m.rotation.x = -Math.PI / 2;
+    const wp = tileToWorld(tx, tz, gridWidth, gridHeight);
+    m.position.set(wp.x, 0.02, wp.z);
+    m.name = `Marker_${key}`;
+    markerGroup.add(m);
+    markedTiles.set(key, m);
+  }
+
+  function clearAllMarkers() {
+    for (const [, mesh] of markedTiles) {
+      markerGroup.remove(mesh);
+      mesh.geometry.dispose();
+      mesh.material.dispose();
+    }
+    markedTiles.clear();
+  }
 
   // -------- Save/Load helpers --------
   function getProjectData() {
     const charTx = controller.tilePos?.tx ?? Math.floor(gridWidth / 2);
     const charTz = controller.tilePos?.tz ?? Math.floor(gridHeight / 2);
+    const markers = [...markedTiles.keys()].map(k => k.split(',').map(Number));
+
     return {
-      version: 1,
+      version: 3,
       timestamp: Date.now(),
       grid: { width: gridWidth, height: gridHeight },
       character: { tx: charTx, tz: charTz },
@@ -171,30 +224,40 @@ window.onload = function () {
         target: [controls.target.x, controls.target.y, controls.target.z]
       },
       settings: {
-        freezeTapToMove: !!freezeTapToMove
-      }
-      // markers, terrain layers, etc. can be added here later
+        freezeTapToMove: !!freezeTapToMove,
+        markerMode: !!markerMode
+      },
+      markers
     };
   }
 
   function applyProjectData(data) {
-    // 1) grid
     const w = Math.max(2, Math.min(200, Number(data.grid.width) || 30));
     const h = Math.max(2, Math.min(200, Number(data.grid.height) || 30));
     regenerateWorld(w, h);
 
-    // 2) character tile (clamped)
+    // Character
     const tx = Math.max(0, Math.min(w - 1, Number(data.character?.tx) ?? Math.floor(w / 2)));
     const tz = Math.max(0, Math.min(h - 1, Number(data.character?.tz) ?? Math.floor(h / 2)));
     controller.resetTo(tx, tz);
 
-    // 3) settings
-    freezeTapToMove = !!data.settings?.freezeTapToMove;
-    // reflect in UI if present
-    const chk = document.getElementById('freezeMoveToggle');
-    if (chk) chk.checked = freezeTapToMove;
+    // Restore markers (but keep Marker Mode OFF after load)
+    markerMode = false;
+    clearAllMarkers();
+    if (Array.isArray(data.markers)) {
+      for (const pair of data.markers) {
+        if (Array.isArray(pair) && pair.length === 2) {
+          const mx = Number(pair[0]), mz = Number(pair[1]);
+          if (Number.isFinite(mx) && Number.isFinite(mz)) addMarker(mx, mz);
+        }
+      }
+      controller.applyNonWalkables([...markedTiles.keys()]);
+    }
 
-    // 4) camera (optional)
+    // Restore freeze (Marker Mode stays OFF → freeze toggle enabled)
+    setFreeze(!!data.settings?.freezeTapToMove, /*disableUI*/ false);
+
+    // Camera
     if (Array.isArray(data.camera?.position) && Array.isArray(data.camera?.target)) {
       const [cx, cy, cz] = data.camera.position;
       const [txx, tyy, tzz] = data.camera.target;
@@ -204,7 +267,6 @@ window.onload = function () {
         controls.update();
       }
     } else {
-      // otherwise center on character
       const center = tileToWorld(tx, tz, w, h);
       controls.target.copy(center);
       camera.position.set(center.x + 2, 6, center.z + 8);
@@ -212,7 +274,7 @@ window.onload = function () {
     }
   }
 
-  // -------- UI: freeze toggle --------
+  // -------- Freeze HUD (top-left) --------
   function addFreezeToggle() {
     const style = document.createElement('style');
     style.textContent = `
@@ -240,6 +302,7 @@ window.onload = function () {
       }
       input:checked + .slider { background: #00aaff; }
       input:checked + .slider:before { transform: translateX(20px); }
+      input:disabled + .slider { filter: grayscale(0.3); opacity: 0.65; cursor: not-allowed; }
     `;
     document.head.appendChild(style);
 
@@ -256,7 +319,24 @@ window.onload = function () {
 
     freezeCheckboxEl = hud.querySelector('#freezeMoveToggle');
     freezeCheckboxEl.addEventListener('change', () => {
+      if (markerMode) {
+        // While marking, freeze is locked ON — ignore manual changes
+        freezeCheckboxEl.checked = true;
+        return;
+      }
       freezeTapToMove = freezeCheckboxEl.checked;
     });
+  }
+
+  // Helper to set + (optionally) lock the freeze UI
+  function setFreeze(on, disableUI) {
+    freezeTapToMove = !!on;
+    if (freezeCheckboxEl) {
+      freezeCheckboxEl.checked = freezeTapToMove;
+      freezeCheckboxEl.disabled = !!disableUI;
+      freezeCheckboxEl.parentElement.title = disableUI
+        ? 'Freeze is locked ON while Marker Mode is active'
+        : 'Freeze tap-to-move';
+    }
   }
 };
