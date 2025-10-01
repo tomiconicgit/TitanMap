@@ -2,26 +2,21 @@
 import * as THREE from 'three';
 
 export class Terrain {
-  /**
-   * @param {THREE.Scene} scene
-   */
   constructor(scene) {
     this.scene = scene;
     this.mesh = null;
-    this.edges = null;
-    this.gridWidth = 10;
-    this.gridHeight = 10;
-    this.showOutlines = false;
 
-    // Raycast helpers
-    this.raycaster = new THREE.Raycaster();
-    this.ndc = new THREE.Vector2();
+    this.showOutlines = false;
+    this.edgesMesh = null;
+
+    // scratch
+    this._raycaster = new THREE.Raycaster();
+    this._ndc = new THREE.Vector2();
   }
 
-  /** Build/replace the single terrain mesh sized to (w,h) with (w,h) segments */
-  rebuild(w, h) {
-    this.gridWidth = w | 0;
-    this.gridHeight = h | 0;
+  rebuild(width, height) {
+    this.width = width | 0;
+    this.height = height | 0;
 
     if (this.mesh) {
       this.scene.remove(this.mesh);
@@ -29,89 +24,107 @@ export class Terrain {
       this.mesh.material?.dispose?.();
       this.mesh = null;
     }
+    if (this.edgesMesh) {
+      this.scene.remove(this.edgesMesh);
+      this.edgesMesh.geometry?.dispose?.();
+      this.edgesMesh.material?.dispose?.();
+      this.edgesMesh = null;
+    }
 
-    const geo = new THREE.PlaneGeometry(this.gridWidth, this.gridHeight, this.gridWidth, this.gridHeight);
-    const mat = new THREE.MeshStandardMaterial({ color: 0x777777, roughness: 0.95, metalness: 0.0 });
+    // Size == tiles, Segments == tiles
+    const geo = new THREE.PlaneGeometry(this.width, this.height, this.width, this.height);
+    const mat = new THREE.MeshStandardMaterial({
+      color: 0x777777,
+      roughness: 0.95,
+      metalness: 0.0
+    });
+
     this.mesh = new THREE.Mesh(geo, mat);
-    this.mesh.rotation.x = -Math.PI / 2;
-    this.mesh.name = `Terrain_${this.gridWidth}x${this.gridHeight}`;
+    this.mesh.rotation.x = -Math.PI / 2; // XY => XZ, Z becomes world Y
     this.mesh.receiveShadow = true;
+    this.mesh.name = `Terrain_${this.width}x${this.height}`;
     this.scene.add(this.mesh);
 
-    this._rebuildOutlines();
+    if (this.showOutlines) this._rebuildEdges();
   }
 
   setOutlinesVisible(on) {
     this.showOutlines = !!on;
-    this._rebuildOutlines();
+    if (this.showOutlines) this._rebuildEdges();
+    else if (this.edgesMesh) {
+      this.scene.remove(this.edgesMesh);
+      this.edgesMesh.geometry?.dispose?.();
+      this.edgesMesh.material?.dispose?.();
+      this.edgesMesh = null;
+    }
   }
 
-  _rebuildOutlines() {
-    // remove old
-    if (this.edges) {
-      this.scene.remove(this.edges);
-      this.edges.geometry?.dispose?.();
-      this.edges.material?.dispose?.();
-      this.edges = null;
+  _rebuildEdges() {
+    if (!this.mesh) return;
+    if (this.edgesMesh) {
+      this.scene.remove(this.edgesMesh);
+      this.edgesMesh.geometry?.dispose?.();
+      this.edgesMesh.material?.dispose?.();
+      this.edgesMesh = null;
     }
-    if (!this.mesh || !this.showOutlines) return;
+    const eg = new THREE.EdgesGeometry(this.mesh.geometry);
+    const emat = new THREE.LineBasicMaterial({ color: 0x00aaff });
+    this.edgesMesh = new THREE.LineSegments(eg, emat);
+    this.edgesMesh.position.copy(this.mesh.position);
+    this.edgesMesh.rotation.copy(this.mesh.rotation);
+    this.edgesMesh.position.y += 0.001;
+    this.edgesMesh.renderOrder = 1;
+    this.scene.add(this.edgesMesh);
+  }
 
-    const w = this.gridWidth | 0, h = this.gridHeight | 0;
-    const verts = [];
-    const xMin = -w / 2, xMax = w / 2;
-    const yMin = -h / 2, yMax = h / 2;
+  raycastPointer(evt, camera, canvas) {
+    if (!this.mesh) return null;
+    const rect = canvas.getBoundingClientRect();
+    this._ndc.x = ((evt.clientX - rect.left) / rect.width) * 2 - 1;
+    this._ndc.y = -((evt.clientY - rect.top) / rect.height) * 2 + 1;
 
-    // vertical grid lines
-    for (let xi = 0; xi <= w; xi++) {
-      const x = xMin + xi;
-      verts.push(x, yMin, 0,  x, yMax, 0);
-    }
-    // horizontal grid lines
-    for (let yi = 0; yi <= h; yi++) {
-      const y = yMin + yi;
-      verts.push(xMin, y, 0,  xMax, y, 0);
-    }
-
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
-    const mat = new THREE.LineBasicMaterial({ color: 0x00aaff });
-
-    this.edges = new THREE.LineSegments(geo, mat);
-    this.edges.position.copy(this.mesh.position);
-    this.edges.rotation.copy(this.mesh.rotation);
-    this.edges.position.y += 0.001;
-    this.edges.renderOrder = 1;
-    this.scene.add(this.edges);
+    this._raycaster.setFromCamera(this._ndc, camera);
+    const hit = this._raycaster.intersectObject(this.mesh, false);
+    if (!hit.length) return null;
+    // return world-space point on mesh
+    return hit[0].point;
   }
 
   /**
-   * Raycast the pointer to this mesh, returns world point or null
-   * @param {PointerEvent} e
-   * @param {THREE.Camera} camera
-   * @param {HTMLCanvasElement} canvas
+   * Sample the current deformed surface height (world Y) at world XZ.
+   * Uses bilinear interpolation of the plane's vertex Z (after deformation).
    */
-  raycastPointer(e, camera, canvas) {
-    if (!this.mesh) return null;
-    const rect = canvas.getBoundingClientRect();
-    this.ndc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-    this.ndc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-    this.raycaster.setFromCamera(this.ndc, camera);
-    const hit = this.raycaster.intersectObject(this.mesh, false);
-    return hit.length ? hit[0].point : null;
-  }
+  getHeightAt(worldX, worldZ) {
+    if (!this.mesh) return 0;
+    const pos = this.mesh.geometry.attributes.position;
+    const w = this.width, h = this.height;
 
-  dispose() {
-    if (this.edges) {
-      this.scene.remove(this.edges);
-      this.edges.geometry?.dispose?.();
-      this.edges.material?.dispose?.();
-      this.edges = null;
-    }
-    if (this.mesh) {
-      this.scene.remove(this.mesh);
-      this.mesh.geometry?.dispose?.();
-      this.mesh.material?.dispose?.();
-      this.mesh = null;
-    }
+    // Convert worldX/worldZ to local tile-space [0..w]x[0..h]
+    // Plane is centered; tiles are 1x1.
+    let lx = worldX + w / 2;
+    let lz = worldZ + h / 2;
+
+    // Clamp inside the mesh
+    lx = Math.min(Math.max(lx, 0), w - 1e-6);
+    lz = Math.min(Math.max(lz, 0), h - 1e-6);
+
+    const tx = Math.floor(lx);
+    const tz = Math.floor(lz);
+    const fx = lx - tx;
+    const fz = lz - tz;
+
+    // Vertex indices: (vx, vz) => vz*(w+1) + vx
+    const idx = (vx, vz) => vz * (w + 1) + vx;
+
+    const v00 = pos.getZ(idx(tx,     tz    )); // top-left
+    const v10 = pos.getZ(idx(tx + 1, tz    )); // top-right
+    const v01 = pos.getZ(idx(tx,     tz + 1)); // bottom-left
+    const v11 = pos.getZ(idx(tx + 1, tz + 1)); // bottom-right
+
+    // Bilinear interpolation inside the 1x1 tile
+    const a = v00 * (1 - fx) + v10 * fx;
+    const b = v01 * (1 - fx) + v11 * fx;
+    const height = a * (1 - fz) + b * fz;
+    return height;
   }
 }
