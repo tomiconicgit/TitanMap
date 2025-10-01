@@ -1,3 +1,4 @@
+// file: viewport.js
 import * as THREE from 'three';
 
 export default class Viewport {
@@ -8,12 +9,12 @@ export default class Viewport {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     document.body.appendChild(this.renderer.domElement);
-    
+
     this.clock = new THREE.Clock();
     this.onBeforeRender = () => {};
     this.scene = null;
     this.camera = null;
-    
+
     window.addEventListener('resize', () => {
       if (this.camera) {
         this.camera.aspect = window.innerWidth / window.innerHeight;
@@ -21,11 +22,11 @@ export default class Viewport {
       }
       this.renderer.setSize(window.innerWidth, window.innerHeight);
     });
-    
+
     this.renderer.setAnimationLoop(() => {
       if (this.scene && this.camera) {
-        const deltaTime = this.clock.getDelta();
-        this.onBeforeRender(deltaTime);
+        const dt = this.clock.getDelta();
+        this.onBeforeRender(dt);
         this.renderer.render(this.scene, this.camera);
       }
     });
