@@ -70,7 +70,7 @@ function init() {
     rayleigh: 0.508,
     mieCoefficient: 0.002,
     mieDirectionalG: 0.654,
-    elevation: 70,     // <-- set to 70° as requested
+    elevation: 70,     // <- as requested
     azimuth: 180,
     exposure: 0.3209
   };
@@ -188,7 +188,7 @@ function init() {
     updateSkyAndLight(span, new THREE.Vector3(x, 0, z));
   }
 
-  // --- Build Freeze Toggle (top-left) ---
+  // --- Freeze Toggle (top-left) ---
   (function addFreezeToggle() {
     const style = document.createElement('style');
     style.textContent = `
@@ -299,7 +299,7 @@ function init() {
     }
   });
 
-  // --- Tap-to-move input on the canvas ---
+  // --- Tap-to-move input on the canvas (camera follows) ---
   const canvas = viewport.renderer.domElement;
 
   canvas.addEventListener('pointerdown', (e) => {
@@ -307,9 +307,8 @@ function init() {
   });
 
   canvas.addEventListener('pointerup', (e) => {
-    // simple drag-threshold so Orbit drag doesn't trigger move
     const up = new THREE.Vector2(e.clientX, e.clientY);
-    if (downPos.distanceTo(up) > 5) return;
+    if (downPos.distanceTo(up) > 5) return;      // ignore drags
     if (freezeTapToMove) return;
     if (!terrainMesh) return;
 
@@ -321,12 +320,19 @@ function init() {
     const hit = raycaster.intersectObject(terrainMesh, false);
     if (!hit.length) return;
 
-    const p = hit[0].point; // world space point on plane
+    const p = hit[0].point;
     const { tx, tz } = worldToTile(p.x, p.z, gridWidth, gridHeight);
     const c = tileToWorld(tx, tz, gridWidth, gridHeight);
 
-    // move ball to center of tapped tile
-    character.position.set(c.x, 0.35, c.z);
+    // --- FOLLOW CAM: shift camera and controls.target by same delta as the ball ---
+    const old = character.position.clone();
+    const newPos = new THREE.Vector3(c.x, 0.35, c.z);
+    const delta = newPos.clone().sub(old);
+
+    character.position.copy(newPos);
+    camera.position.add(delta);
+    controls.target.add(delta);
+    controls.update();
   });
 
   // --- Loop ---
