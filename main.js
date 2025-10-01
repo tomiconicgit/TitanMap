@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import Viewport from './viewport.js';
 import { createCamera } from './camera.js';
+import { createGrid } from './grid.js'; // Import the new grid module
 
 // 1. Create a scene
 const scene = new THREE.Scene();
@@ -13,20 +14,16 @@ const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
 directionalLight.position.set(5, 10, 7.5);
 scene.add(directionalLight);
 
-// 3. Add an object to look at
-const geometry = new THREE.BoxGeometry(1, 1, 1);
-const material = new THREE.MeshStandardMaterial({ 
-    color: 0x0099ff, 
-    roughness: 0.7 
-});
-const cube = new THREE.Mesh(geometry, material);
-scene.add(cube);
+// 3. Add the grid to the scene
+const grid = createGrid();
+scene.add(grid);
 
 // 4. Initialize the viewport first to get its canvas element
 const viewport = new Viewport(); 
 
 // 5. Create the camera and controls, passing the viewport's canvas
 const { camera, controls } = createCamera(viewport.renderer.domElement);
+controls.target.set(0, 0, 0); // Ensure camera is looking at the center
 
 // 6. Connect the scene and camera to the viewport
 viewport.scene = scene;
