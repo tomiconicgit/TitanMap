@@ -1,71 +1,61 @@
+// file: character-controller.js
 import * as THREE from 'three';
 import { tileToWorld } from './grid-utils.js';
 
-function buildStraightPath(ax, az, bx, bz) {
-  // Simple Manhattan-ish path: step X then Z (no obstacles yet).
-  const path = [];
-  let x = ax, z = az;
-
-  const stepx = (bx > x) ? 1 : -1;
-  const stepz = (bz > z) ? 1 : -1;
-
-  while (x !== bx) { x += stepx; path.push([x, z]); }
-  while (z !== bz) { z += stepz; path.push([x, z]); }
-
-  return path;
-}
-
 export class CharacterController {
-  constructor(characterMesh, startTx, startTz, speed = 4) {
+  constructor(characterMesh, startTx, startTz, gridWidth = 10, gridHeight = 10) {
     this.mesh = characterMesh;
-    this.tilePos = { tx: startTx, tz: startTz };
-    this.speed = speed;
-
+    this.speed = 4;
     this.path = [];
-    this.targetPosition = tileToWorld(startTx, startTz).clone();
     this.isMoving = false;
+    this.targetPosition = new THREE.Vector3();
+    
+    this.gridWidth = gridWidth;
+    this.gridHeight = gridHeight;
 
-    // Use the global PF (from pathfinding-browser.js) if available.
     this.PF = (typeof window !== 'undefined') ? window.PF : null;
-    if (!this.PF) {
-      console.warn('[CharacterController] window.PF not found; will use straight-line fallback.');
-    } else {
-      this.pfGrid = new this.PF.Grid(10, 10);
+    if (this.PF) {
+      this.pfGrid = new this.PF.Grid(gridWidth, gridHeight);
       this.finder = new this.PF.AStarFinder({
         allowDiagonal: true,
         dontCrossCorners: true
       });
     }
+
+    this.resetTo(startTx, startTz);
+  }
+
+  // Called when the grid is regenerated
+  updateGridSize(width, height) {
+    this.gridWidth = width;
+    this.gridHeight = height;
+    if (this.PF) {
+      this.pfGrid = new this.PF.Grid(width, height);
+    }
+  }
+
+  // Instantly moves the character to a new tile
+  resetTo(tx, tz) {
+    this.isMoving = false;
+    this.path = [];
+    this.tilePos = { tx, tz };
+    const worldPos = tileToWorld(tx, tz, this.gridWidth, this.gridHeight);
+    this.mesh.position.set(worldPos.x, this.mesh.position.y, worldPos.z);
+    this.targetPosition.copy(this.mesh.position);
   }
 
   moveTo(tx, tz) {
     if (this.isMoving || (tx === this.tilePos.tx && tz === this.tilePos.tz)) return;
-    if (tx < 0 || tx > 9 || tz < 0 || tz > 9) return;
+    if (tx < 0 || tx >= this.gridWidth || tz < 0 || tz >= this.gridHeight) return;
 
     let path = null;
-
-    if (this.PF && this.pfGrid && this.finder) {
-      try {
+    if (this.PF && this.finder) {
         const grid = this.pfGrid.clone();
-        const { tx: sx, tz: sz } = this.tilePos;
-        path = this.finder.findPath(sx, sz, tx, tz, grid);
-        if (!Array.isArray(path) || path.length <= 1) path = null;
-      } catch (e) {
-        console.warn('[CharacterController] PF failed, falling back to straight path.', e);
-        path = null;
-      }
+        path = this.finder.findPath(this.tilePos.tx, this.tilePos.tz, tx, tz, grid);
     }
-
-    if (!path) {
-      // Fallback: straight path (X then Z)
-      path = buildStraightPath(this.tilePos.tx, this.tilePos.tz, tx, tz);
-    } else {
-      // Drop the first node (it's the current tile)
-      path = path.slice(1);
-    }
-
-    if (path.length > 0) {
-      this.path = path;
+    
+    if (path && path.length > 1) {
+      this.path = path.slice(1);
       this.isMoving = true;
       this._setNextTarget();
     }
@@ -77,13 +67,12 @@ export class CharacterController {
       return;
     }
     const [nx, nz] = this.path[0];
-    const wp = tileToWorld(nx, nz);
+    const wp = tileToWorld(nx, nz, this.gridWidth, this.gridHeight);
     this.targetPosition.set(wp.x, this.mesh.position.y, wp.z);
   }
 
   update(dt) {
     if (!this.isMoving) return;
-
     const dist = this.mesh.position.distanceTo(this.targetPosition);
 
     if (dist < 0.05) {
@@ -99,7 +88,7 @@ export class CharacterController {
     }
 
     const step = this.speed * dt;
-    const t = Math.min(1, step / Math.max(1e-6, dist)); // clamp so we never overshoot
+    const t = Math.min(1, step / Math.max(1e-6, dist));
     this.mesh.position.lerp(this.targetPosition, t);
   }
 }
