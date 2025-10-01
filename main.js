@@ -4,29 +4,45 @@ import Viewport from './viewport.js';
 import { createCamera } from './camera.js';
 import { createGrid } from './grid.js';
 import { createCharacter } from './character.js';
-import { worldToTile } from './grid-utils.js';
+import { worldToTile, tileToWorld } from './grid-utils.js';
 import { CharacterController } from './character-controller.js';
 import { UIPanel } from './ui-panel.js';
 
 window.onload = function () {
+  // --- World State ---
+  let gridWidth, gridHeight;
+  let grid, groundPlane;
+
   // 1) Scene & lights
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x111318);
-
   const ambientLight = new THREE.AmbientLight(0xffffff, 0.55);
   const dirLight = new THREE.DirectionalLight(0xffffff, 1.1);
   dirLight.position.set(5, 10, 7.5);
   scene.add(ambientLight, dirLight);
 
-  // --- Grid and Ground Plane (will be managed by a function) ---
-  let grid, groundPlane;
+  // 2) Character (red circle) + controller
+  const character = createCharacter();
+  const controller = new CharacterController(character, 0, 0); // Initialized but will be reset
+  scene.add(character);
 
-  function regenerateGrid(width = 10, height = 10) {
+  // 3) Viewport + camera (with OrbitControls)
+  const viewport = new Viewport();
+  const { camera, controls } = createCamera(viewport.renderer.domElement);
+  viewport.scene = scene;
+  viewport.camera = camera;
+  
+  // --- Main World Regeneration Function ---
+  function regenerateWorld(width, height) {
+    gridWidth = width;
+    gridHeight = height;
+
     // Remove old objects if they exist
     if (grid) scene.remove(grid);
     if (groundPlane) scene.remove(groundPlane);
 
-    grid = createGrid(width, height); // Assumes createGrid is updated to handle args
+    // Create new grid visuals and raycasting plane
+    grid = createGrid(width, height);
     scene.add(grid);
 
     groundPlane = new THREE.Mesh(
@@ -34,42 +50,35 @@ window.onload = function () {
       new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide })
     );
     groundPlane.rotation.x = -Math.PI / 2;
-    groundPlane.name = 'GroundRaycastPlane';
     scene.add(groundPlane);
     
-    // TODO: Update pathfinding grid, character position, etc.
+    // Update the pathfinding grid size
+    controller.updateGridSize(width, height);
+
+    // Reset character to the center of the new grid
+    const centerTx = Math.floor(width / 2);
+    const centerTz = Math.floor(height / 2);
+    controller.resetTo(centerTx, centerTz);
+
+    // Reset camera to look at the new center
+    const newCenterWorld = tileToWorld(centerTx, centerTz, width, height);
+    controls.target.copy(newCenterWorld);
+    camera.position.set(newCenterWorld.x + 2, 6, newCenterWorld.z + 8);
+    controls.update();
   }
   
-  // Initial grid creation
-  regenerateGrid(10, 10);
-
-  // 3) Character (red circle) + controller
-  const startTile = { tx: 5, tz: 5 };
-  const character = createCharacter();
-  const controller = new CharacterController(character, startTile.tx, startTile.tz);
-  const spawn = controller.targetPosition.clone();
-  character.position.set(spawn.x, character.position.y, spawn.z);
-  scene.add(character);
-
-  // 4) Viewport + camera (with OrbitControls)
-  const viewport = new Viewport();
-  const { camera, controls } = createCamera(viewport.renderer.domElement);
-  viewport.scene = scene;
-  viewport.camera = camera;
-
-  // 5) Create the UI Panel and listen for its events
+  // 4) Create the UI Panel and listen for its events
   const uiPanel = new UIPanel(document.body);
   uiPanel.panelElement.addEventListener('generate', (e) => {
     const { width, height } = e.detail;
-    console.log(`Regenerating grid with size: ${width} x ${height}`);
-    regenerateGrid(width, height);
+    regenerateWorld(width, height);
   });
 
   // --- FOLLOW: keep camera & target translating with the character ---
-  const lastCharPos = character.position.clone();
+  const lastCharPos = new THREE.Vector3();
   const moveDelta = new THREE.Vector3();
 
-  // 6) Tap-to-move (tap, not drag)
+  // 5) Tap-to-move (tap, not drag)
   const raycaster = new THREE.Raycaster();
   const ndc = new THREE.Vector2();
   const downPos = new THREE.Vector2();
@@ -88,19 +97,22 @@ window.onload = function () {
     const hit = raycaster.intersectObject(groundPlane, false);
     if (hit.length === 0) return;
 
-    const { tx, tz } = worldToTile(hit[0].point, width, height); // Assumes worldToTile is updated
+    const { tx, tz } = worldToTile(hit[0].point, gridWidth, gridHeight);
     controller.moveTo(tx, tz);
   });
 
-  // 7) Loop
+  // 6) Loop
   viewport.onBeforeRender = (dt) => {
+    lastCharPos.copy(character.position);
     controller.update(dt);
     moveDelta.subVectors(character.position, lastCharPos);
     if (moveDelta.lengthSq() > 0) {
       camera.position.add(moveDelta);
       controls.target.add(moveDelta);
-      lastCharPos.copy(character.position);
     }
     controls.update();
   };
+
+  // --- Initial Boot ---
+  regenerateWorld(30, 30); // Generate the initial 30x30 world
 };
