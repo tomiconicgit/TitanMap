@@ -4,6 +4,14 @@ export class UIPanel {
     this.container = container;
     this.activeTab = null;
     this.panelElement = document.createElement('div');
+
+    // hidden file input for "Load"
+    this.fileInput = document.createElement('input');
+    this.fileInput.type = 'file';
+    this.fileInput.accept = 'application/json,.json';
+    this.fileInput.style.display = 'none';
+    document.body.appendChild(this.fileInput);
+
     this._createStyles();
     this._createPanel();
     this._addEventListeners();
@@ -23,7 +31,7 @@ export class UIPanel {
     this.widthInput.max = 200;
 
     const separator = document.createElement('span');
-    separator.textContent = '×'; // proper multiplication symbol
+    separator.textContent = '×';
 
     this.heightInput = document.createElement('input');
     this.heightInput.type = 'number';
@@ -37,6 +45,32 @@ export class UIPanel {
 
     wrapper.append(label, this.widthInput, separator, this.heightInput, this.generateButton);
     return wrapper;
+  }
+
+  _createSettingsTabContent() {
+    const wrap = document.createElement('div');
+    wrap.className = 'panel-col';
+
+    const row1 = document.createElement('div');
+    row1.className = 'panel-row';
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'save-btn';
+    saveBtn.textContent = 'Save Project…';
+    row1.appendChild(saveBtn);
+
+    const row2 = document.createElement('div');
+    row2.className = 'panel-row';
+    const loadBtn = document.createElement('button');
+    loadBtn.className = 'load-btn';
+    loadBtn.textContent = 'Load Project…';
+    row2.appendChild(loadBtn);
+
+    const hint = document.createElement('div');
+    hint.className = 'hint';
+    hint.textContent = 'Saves include grid size, character tile, camera view, and editor settings.';
+
+    wrap.append(row1, row2, hint);
+    return wrap;
   }
 
   _createPanel() {
@@ -68,6 +102,7 @@ export class UIPanel {
   }
 
   _addEventListeners() {
+    // Switch tabs
     this.panelElement.querySelector('.tabs-container').addEventListener('click', (e) => {
       const clicked = e.target.closest('.tab');
       if (!clicked || clicked === this.activeTab) return;
@@ -80,21 +115,60 @@ export class UIPanel {
       const tabName = clicked.dataset.tabName;
       if (tabName === 'Grid') {
         this.contentElement.appendChild(this._createGridTabContent());
+      } else if (tabName === 'Settings') {
+        this.contentElement.appendChild(this._createSettingsTabContent());
       } else {
         this.contentElement.textContent = `Content for the ${tabName} tab will appear here.`;
       }
     });
 
-    // Robust delegated click handler (works even if class list changes)
+    // Grid: Generate
     this.contentElement.addEventListener('click', (e) => {
-      const btn = e.target.closest('.generate-btn');
-      if (!btn) return;
+      const genBtn = e.target.closest('.generate-btn');
+      if (genBtn) {
+        const width = Math.max(2, Math.min(200, parseInt(this.widthInput.value, 10) || 30));
+        const height = Math.max(2, Math.min(200, parseInt(this.heightInput.value, 10) || 30));
+        const evt = new CustomEvent('generate', { detail: { width, height } });
+        this.panelElement.dispatchEvent(evt);
+        return;
+      }
 
-      const width = Math.max(2, Math.min(200, parseInt(this.widthInput.value, 10) || 30));
-      const height = Math.max(2, Math.min(200, parseInt(this.heightInput.value, 10) || 30));
+      // Settings: Save
+      const saveBtn = e.target.closest('.save-btn');
+      if (saveBtn) {
+        let filename = window.prompt('Name your save file:', 'titanmap.json');
+        if (!filename) return;
+        if (!filename.toLowerCase().endsWith('.json')) filename += '.json';
+        const evt = new CustomEvent('save-project', { detail: { filename } });
+        this.panelElement.dispatchEvent(evt);
+        return;
+      }
 
-      const evt = new CustomEvent('generate', { detail: { width, height } });
-      this.panelElement.dispatchEvent(evt);
+      // Settings: Load
+      const loadBtn = e.target.closest('.load-btn');
+      if (loadBtn) {
+        this.fileInput.value = '';
+        this.fileInput.click();
+      }
+    });
+
+    // Handle the hidden file input (Load)
+    this.fileInput.addEventListener('change', () => {
+      const file = this.fileInput.files && this.fileInput.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const data = JSON.parse(reader.result);
+          const evt = new CustomEvent('load-project-data', { detail: { data, filename: file.name } });
+          this.panelElement.dispatchEvent(evt);
+        } catch (err) {
+          alert('Invalid save file (not JSON).');
+        }
+      };
+      reader.onerror = () => alert('Failed to read the file.');
+      reader.readAsText(file);
     });
   }
 
@@ -121,17 +195,22 @@ export class UIPanel {
       .tab:hover { color: #fff; }
       .tab.active { color: #fff; border-bottom-color: #00aaff; }
       .panel-content { padding: 20px; font-size: 14px; min-height: 40px; }
-      .panel-row { display: flex; align-items: center; gap: 10px; }
+      .panel-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+      .panel-col { display: flex; flex-direction: column; }
       .panel-row label { font-weight: 500; color: #ccc; }
       .panel-row input[type="number"] {
         width: 64px; background: #111; border: 1px solid #444; color: #fff;
         padding: 8px; border-radius: 2px; text-align: center;
       }
       .panel-row span { color: #777; font-weight: bold; }
-      .generate-btn {
-        margin-left: auto; background: #00aaff; color: #fff; border: none; padding: 8px 16px;
+      .generate-btn,
+      .save-btn,
+      .load-btn {
+        background: #00aaff; color: #fff; border: none; padding: 8px 16px;
         border-radius: 2px; font-weight: 600; cursor: pointer;
       }
+      .load-btn { background: #6a5acd; }
+      .hint { opacity: 0.7; font-size: 12px; margin-top: 4px; }
     `;
     document.head.appendChild(style);
   }
