@@ -54,6 +54,9 @@ function init() {
   });
 
   const heightTool = new HeightTool(scene, null, 10, 10);
+  // NEW: whenever heights are applied, rebuild the terrain outlines so they follow the deformed mesh
+  heightTool.setOnApplied(() => terrain.onHeightsUpdated());
+
   let heightMode = false;
   let pinMode = false;
   let currentHeightValue = 0;
@@ -88,7 +91,6 @@ function init() {
     heightTool.reset(terrain.mesh, gridWidth, gridHeight);
 
     painter.setGridSize(gridWidth, gridHeight);
-    // keep existing paint? For fresh world, clear map (no colors to clear as base is gray)
     painter.painted.clear();
 
     const span = Math.max(gridWidth, gridHeight);
