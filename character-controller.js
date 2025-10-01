@@ -9,7 +9,7 @@ export class CharacterController {
     this.path = [];
     this.isMoving = false;
     this.targetPosition = new THREE.Vector3();
-    
+
     this.gridWidth = gridWidth;
     this.gridHeight = gridHeight;
 
@@ -25,16 +25,20 @@ export class CharacterController {
     this.resetTo(startTx, startTz);
   }
 
-  // Called when the grid is regenerated
   updateGridSize(width, height) {
     this.gridWidth = width;
     this.gridHeight = height;
     if (this.PF) {
       this.pfGrid = new this.PF.Grid(width, height);
+      if (!this.finder) {
+        this.finder = new this.PF.AStarFinder({
+          allowDiagonal: true,
+          dontCrossCorners: true
+        });
+      }
     }
   }
 
-  // Instantly moves the character to a new tile
   resetTo(tx, tz) {
     this.isMoving = false;
     this.path = [];
@@ -49,11 +53,11 @@ export class CharacterController {
     if (tx < 0 || tx >= this.gridWidth || tz < 0 || tz >= this.gridHeight) return;
 
     let path = null;
-    if (this.PF && this.finder) {
-        const grid = this.pfGrid.clone();
-        path = this.finder.findPath(this.tilePos.tx, this.tilePos.tz, tx, tz, grid);
+    if (this.PF && this.finder && this.pfGrid) {
+      const gridClone = this.pfGrid.clone(); // IMPORTANT: always clone before searching
+      path = this.finder.findPath(this.tilePos.tx, this.tilePos.tz, tx, tz, gridClone);
     }
-    
+
     if (path && path.length > 1) {
       this.path = path.slice(1);
       this.isMoving = true;
