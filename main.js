@@ -12,6 +12,7 @@ import { FreezeHUD } from './hud-freeze.js';
 
 import { tileToWorld, worldToTile, keyFor } from './tile-utils.js';
 import { moveCharacterToTile } from './movement.js';
+import { HeightTool } from './height-tool.js';
 
 function init() {
   // Scene & renderer
@@ -50,11 +51,17 @@ function init() {
   const freezeHUD = new FreezeHUD();
   let freezeTapToMove = false;
   freezeHUD.onChange((checked) => {
-    if (markerMode) { freezeHUD.set(true); return; } // locked during marker mode
+    if (markerMode || heightMode) { freezeHUD.set(true); return; } // lock while tools active
     freezeTapToMove = !!checked;
   });
 
-  // UI Panel (your existing UI)
+  // Height Tool
+  const heightTool = new HeightTool(scene, null, 10, 10);
+  let heightMode = false;
+  let pinMode = false;
+  let currentHeightValue = 0; // [-10..10], step 0.2
+
+  // UI
   const uiPanel = new UIPanel(document.body);
 
   // World state
@@ -76,7 +83,9 @@ function init() {
     controls.update();
 
     markerTool.setGridSize(gridWidth, gridHeight);
-    blockedTiles.clear(); // new world => clear blockers
+    blockedTiles.clear();
+
+    heightTool.reset(terrain.mesh, gridWidth, gridHeight);
 
     const span = Math.max(gridWidth, gridHeight);
     sky.update(span, new THREE.Vector3(c.x, 0, c.z));
@@ -103,7 +112,7 @@ function init() {
     markerMode = wantOn;
 
     if (wantOn) {
-      // entering marker mode: show layer with EXISTING blocked tiles + lock freeze
+      // entering marker mode: show existing blocked tiles, lock freeze
       markerTool.setGridSize(gridWidth, gridHeight);
       markerTool.syncToKeys(blockedTiles);
       markerTool.setVisible(true);
@@ -112,29 +121,66 @@ function init() {
       freezeHUD.set(true);
       freezeHUD.setDisabled(true);
     } else {
-      // leaving: take overlays as newly blocked, hide layer, unfreeze
+      // leaving: add overlays as blocked, hide layer, unfreeze (unless height mode)
       for (const k of markerTool.getMarkedKeys()) blockedTiles.add(k);
-      markerTool.setVisible(false); // keep overlays in memory? we can clear now to rebuild next time:
+      markerTool.setVisible(false);
       markerTool.clearAll();
 
-      freezeTapToMove = false;
-      freezeHUD.set(false);
-      freezeHUD.setDisabled(false);
+      if (!heightMode) {
+        freezeTapToMove = false;
+        freezeHUD.set(false);
+        freezeHUD.setDisabled(false);
+      }
     }
   });
 
-  // UI: Save/Load passthrough
+  // UI: Height toggles & value
+  uiPanel.panelElement.addEventListener('height-toggle-request', (e) => {
+    heightMode = !!(e.detail && e.detail.wantOn);
+
+    if (heightMode) {
+      freezeTapToMove = true;
+      freezeHUD.set(true);
+      freezeHUD.setDisabled(true);
+      heightTool.setPinsVisible(!!pinMode);
+    } else {
+      heightTool.setPinsVisible(false);
+      if (!markerMode) {
+        freezeTapToMove = false;
+        freezeHUD.set(false);
+        freezeHUD.setDisabled(false);
+      }
+    }
+  });
+
+  uiPanel.panelElement.addEventListener('pin-toggle-request', (e) => {
+    pinMode = !!(e.detail && e.detail.wantOn);
+    heightTool.setPinsVisible(heightMode && pinMode);
+  });
+
+  uiPanel.panelElement.addEventListener('height-set', (e) => {
+    let { value } = e.detail || {};
+    if (!Number.isFinite(value)) return;
+    value = Math.max(-10, Math.min(10, Math.round(value / 0.2) * 0.2));
+    currentHeightValue = value;
+  });
+
+  // UI: Save/Load
   uiPanel.panelElement.addEventListener('save-project', (e) => {
     const { filename } = e.detail;
     const data = {
-      version: 5,
+      version: 6,
       timestamp: Date.now(),
       grid: { width: gridWidth, height: gridHeight },
       character: { position: character.position.toArray() },
       camera: { position: camera.position.toArray(), target: controls.target.toArray() },
       view: { outlines: !!terrain.showOutlines },
       sky: { ...sky.params },
-      blocked: [...blockedTiles]
+      blocked: [...blockedTiles],
+      height: {
+        field: Array.from(heightTool.heights),
+        pins: [...heightTool.pinned]
+      }
     };
     const json = JSON.stringify(data, null, 2);
     const blob = new Blob([json], { type: 'application/json' });
@@ -169,13 +215,24 @@ function init() {
       const span = Math.max(gridWidth, gridHeight);
       sky.update(span, controls.target.clone());
     }
+
     blockedTiles.clear();
     if (Array.isArray(data.blocked)) {
       for (const k of data.blocked) blockedTiles.add(String(k));
     }
+
+    // restore height field and pins
+    if (data.height?.field && Array.isArray(data.height.field)) {
+      const hf = data.height.field;
+      if (hf.length === (gridWidth + 1) * (gridHeight + 1)) {
+        heightTool.heights.set(hf);
+        heightTool.pinned = new Set(data.height.pins || []);
+        heightTool.reset(terrain.mesh, gridWidth, gridHeight); // rebuild visuals + apply heights
+      }
+    }
   });
 
-  // Pointer tap handling (movement/marking)
+  // Pointer tap handling (marker / height / movement)
   const canvas = viewport.renderer.domElement;
   const downPos = new THREE.Vector2();
 
@@ -185,25 +242,37 @@ function init() {
 
   canvas.addEventListener('pointerup', (e) => {
     const up = new THREE.Vector2(e.clientX, e.clientY);
-    if (downPos.distanceTo(up) > 5) return;            // ignore drags
+    if (downPos.distanceTo(up) > 5) return; // ignore drags
 
     const p = terrain.raycastPointer(e, camera, canvas);
     if (!p) return;
 
     const { tx, tz } = worldToTile(p.x, p.z, gridWidth, gridHeight);
 
+    // Marker Mode
     if (markerMode) {
       markerTool.mark(tx, tz);
       return;
     }
 
+    // Height Mode
+    if (heightMode) {
+      if (pinMode) {
+        heightTool.togglePin(tx, tz);
+      } else {
+        heightTool.setTileHeight(tx, tz, currentHeightValue);
+      }
+      return;
+    }
+
+    // Movement
     if (freezeTapToMove) return;
     if (blockedTiles.has(keyFor(tx, tz))) return;
 
     moveCharacterToTile(character, camera, controls, tx, tz, gridWidth, gridHeight);
   });
 
-  // Render loop
+  // Loop
   viewport.onBeforeRender = () => {
     controls.update();
   };
