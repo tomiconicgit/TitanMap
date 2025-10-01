@@ -11,7 +11,7 @@ import { MarkerTool } from './marker.js';
 import { FreezeHUD } from './hud-freeze.js';
 
 import { tileToWorld, worldToTile, keyFor } from './tile-utils.js';
-import { moveCharacterToTile } from './movement.js';
+import { MovementController } from './movement.js';
 import { HeightTool } from './height-tool.js';
 
 function init() {
@@ -41,6 +41,12 @@ function init() {
 
   // Terrain
   const terrain = new Terrain(scene);
+
+  // Movement (now terrain-aware)
+  const mover = new MovementController(character, camera, controls, terrain, {
+    speedTilesPerSec: 6,
+    ballRadius: 0.35
+  });
 
   // Marker
   const markerTool = new MarkerTool(scene, tileToWorld);
@@ -72,14 +78,15 @@ function init() {
 
     terrain.rebuild(gridWidth, gridHeight);
 
-    // center character on middle tile
+    // center character on middle tile and snap to surface height
     const tx = Math.floor(gridWidth / 2);
     const tz = Math.floor(gridHeight / 2);
     const c = tileToWorld(tx, tz, gridWidth, gridHeight);
-    character.position.set(c.x, 0.35, c.z);
+    const y = terrain.getHeightAt(c.x, c.z) + 0.35;
+    character.position.set(c.x, y, c.z);
 
-    controls.target.set(c.x, 0, c.z);
-    camera.position.set(c.x + 3, 6, c.z + 9);
+    controls.target.set(c.x, y - 0.35, c.z); // target at ground under ball
+    camera.position.set(c.x + 3, y + 5.65, c.z + 9);
     controls.update();
 
     markerTool.setGridSize(gridWidth, gridHeight);
@@ -112,7 +119,6 @@ function init() {
     markerMode = wantOn;
 
     if (wantOn) {
-      // entering marker mode: show existing blocked tiles, lock freeze
       markerTool.setGridSize(gridWidth, gridHeight);
       markerTool.syncToKeys(blockedTiles);
       markerTool.setVisible(true);
@@ -121,7 +127,6 @@ function init() {
       freezeHUD.set(true);
       freezeHUD.setDisabled(true);
     } else {
-      // leaving: add overlays as blocked, hide layer, unfreeze (unless height mode)
       for (const k of markerTool.getMarkedKeys()) blockedTiles.add(k);
       markerTool.setVisible(false);
       markerTool.clearAll();
@@ -169,7 +174,7 @@ function init() {
   uiPanel.panelElement.addEventListener('save-project', (e) => {
     const { filename } = e.detail;
     const data = {
-      version: 6,
+      version: 7,
       timestamp: Date.now(),
       grid: { width: gridWidth, height: gridHeight },
       character: { position: character.position.toArray() },
@@ -228,6 +233,12 @@ function init() {
         heightTool.heights.set(hf);
         heightTool.pinned = new Set(data.height.pins || []);
         heightTool.reset(terrain.mesh, gridWidth, gridHeight); // rebuild visuals + apply heights
+
+        // snap ball to ground after load
+        const y = terrain.getHeightAt(character.position.x, character.position.z) + 0.35;
+        character.position.y = y;
+        controls.target.y = y - 0.35;
+        controls.update();
       }
     }
   });
@@ -269,11 +280,12 @@ function init() {
     if (freezeTapToMove) return;
     if (blockedTiles.has(keyFor(tx, tz))) return;
 
-    moveCharacterToTile(character, camera, controls, tx, tz, gridWidth, gridHeight);
+    mover.moveToTile(tx, tz, gridWidth, gridHeight);
   });
 
   // Loop
-  viewport.onBeforeRender = () => {
+  viewport.onBeforeRender = (dt) => {
+    mover.update(dt);       // <- keep ball glued to surface during motion
     controls.update();
   };
 }
