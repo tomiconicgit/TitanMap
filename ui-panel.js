@@ -13,19 +13,17 @@ export class UIPanel {
     document.body.appendChild(this.fileInput);
 
     // Terrain selection state (UI only)
-    this._terrainSelected = null; // 'sand' | 'dirt' | ... or null
+    this._terrainSelected = null; // 'sand' | 'dirt' | 'path' | 'grass' | 'gravel' | null
 
     this._createStyles();
     this._createPanel();
     this._addEventListeners();
   }
 
-  /** Public: reflect Marker UI from main if needed */
   setMarkerToggle(on) {
     if (this.markerToggleEl) this.markerToggleEl.checked = !!on;
   }
 
-  /** Public: clear Terrain selection (used when painting gets cancelled externally) */
   clearTerrainSelection() {
     this._terrainSelected = null;
     if (this.terrainListEl) {
@@ -47,7 +45,7 @@ export class UIPanel {
 
     this.widthInput = document.createElement('input');
     this.widthInput.type = 'number';
-    this.widthInput.value = 30;
+    this.widthInput.value = 10;
     this.widthInput.min = 2;
     this.widthInput.max = 200;
 
@@ -56,7 +54,7 @@ export class UIPanel {
 
     this.heightInput = document.createElement('input');
     this.heightInput.type = 'number';
-    this.heightInput.value = 30;
+    this.heightInput.value = 10;
     this.heightInput.min = 2;
     this.heightInput.max = 200;
 
@@ -128,19 +126,17 @@ export class UIPanel {
     const items = [
       ['sand',   'Sand',   'linear-gradient(135deg,#d8c6a3,#cdb88f)'],
       ['dirt',   'Dirt',   'linear-gradient(135deg,#8b5a2b,#6f451f)'],
+      ['path',   'Path',   'linear-gradient(135deg,#bfbfbf,#8d8d8d)'],
       ['grass',  'Grass',  'linear-gradient(135deg,#3aa83a,#2e7d32)'],
-      ['stone',  'Stone',  'linear-gradient(135deg,#909090,#7a7a7a)'],
-      ['gravel', 'Gravel', 'repeating-linear-gradient(135deg,#9a9a9a,#9a9a9a 6px,#8a8a8a 6px,#8a8a8a 12px)'],
-      ['water',  'Water',  'linear-gradient(135deg,#3a7bd5,#2062b0)']
+      ['gravel', 'Gravel', 'repeating-linear-gradient(135deg,#9a9a9a,#9a9a9a 6px,#8a8a8a 6px,#8a8a8a 12px)']
     ];
 
     items.forEach(([k, lbl, bg]) => this.terrainListEl.appendChild(makeItem(k, lbl, bg)));
-
     this.clearTerrainSelection();
 
     const hint = document.createElement('div');
     hint.className = 'hint';
-    hint.textContent = 'Tap a texture to start painting tiles (tap it again to stop).';
+    hint.textContent = 'Tap a texture to start painting tiles (tap again to stop).';
 
     wrap.appendChild(this.terrainListEl);
     wrap.appendChild(hint);
@@ -189,9 +185,9 @@ export class UIPanel {
     this.heightValue = document.createElement('input');
     this.heightValue.type = 'number';
     this.heightValue.value = 0;
-    this.heightValue.min = -10;
-    this.heightValue.max = 10;
-    this.heightValue.step = 0.2;
+    this.heightValue.min = -50;
+    this.heightValue.max = 50;
+    this.heightValue.step = 1;
 
     const downBtn = document.createElement('button');
     downBtn.textContent = 'Down';
@@ -203,7 +199,7 @@ export class UIPanel {
 
     const hint = document.createElement('div');
     hint.className = 'hint';
-    hint.textContent = 'Pin ON: tap to green-highlight tiles (they hold shape). Pin OFF: tap to set tile height (±0.2 steps).';
+    hint.textContent = 'Pin ON: tap to green-highlight tiles. Pin OFF: tap to set tile height.';
 
     row2.append(hvLabel, this.heightValue, downBtn, upBtn);
 
@@ -231,7 +227,7 @@ export class UIPanel {
 
     const hint = document.createElement('div');
     hint.className = 'hint';
-    hint.textContent = 'Saves include grid size, character position, camera view, and view settings.';
+    hint.textContent = 'Saves include grid size, character position, camera view, view and paint.';
 
     wrap.append(row1, row2, hint);
     return wrap;
@@ -249,10 +245,7 @@ export class UIPanel {
       b.className = 'tab';
       b.textContent = name;
       b.dataset.tabName = name;
-      if (i === 0) {
-        b.classList.add('active');
-        this.activeTab = b;
-      }
+      if (i === 0) { b.classList.add('active'); this.activeTab = b; }
       tabsContainer.appendChild(b);
     });
 
@@ -301,8 +294,8 @@ export class UIPanel {
       // Generate
       const genBtn = e.target.closest('.generate-btn');
       if (genBtn) {
-        const width = Math.max(2, Math.min(200, parseInt(this.widthInput.value, 10) || 30));
-        const height = Math.max(2, Math.min(200, parseInt(this.heightInput.value, 10) || 30));
+        const width = Math.max(2, Math.min(200, parseInt(this.widthInput.value, 10) || 10));
+        const height = Math.max(2, Math.min(200, parseInt(this.heightInput.value, 10) || 10));
         const evt = new CustomEvent('generate', { detail: { width, height } });
         this.panelElement.dispatchEvent(evt);
         return;
@@ -332,11 +325,13 @@ export class UIPanel {
       if (item && this.terrainListEl?.contains(item)) {
         const type = item.dataset.type;
         if (this._terrainSelected === type) {
+          // toggle off
           item.classList.remove('selected');
           this._terrainSelected = null;
           const evt = new CustomEvent('terrain-select', { detail: { type, active: false } });
           this.panelElement.dispatchEvent(evt);
         } else {
+          // switch to new selection
           this.terrainListEl.querySelectorAll('.terrain-item.selected')
             .forEach(el => el.classList.remove('selected'));
           item.classList.add('selected');
@@ -347,13 +342,12 @@ export class UIPanel {
         return;
       }
 
-      // Height up/down (±0.2, clamp [-10,10])
+      // Height up/down
       const up = e.target.closest('.height-up');
       const dn = e.target.closest('.height-down');
       if (up || dn) {
-        const cur = parseFloat(this.heightValue?.value || '0') || 0;
-        let next = cur + (up ? 0.2 : -0.2);
-        next = Math.max(-10, Math.min(10, Math.round(next / 0.2) * 0.2));
+        const v = parseInt(this.heightValue?.value || '0', 10);
+        const next = Math.max(-50, Math.min(50, v + (up ? 1 : -1)));
         if (this.heightValue) this.heightValue.value = next;
         const evt = new CustomEvent('height-set', { detail: { value: next } });
         this.panelElement.dispatchEvent(evt);
@@ -361,9 +355,9 @@ export class UIPanel {
       }
     });
 
-    // All 'change' toggles + numeric input
+    // Change events
     this.panelElement.addEventListener('change', (e) => {
-      // Grid outlines
+      // outlines toggle
       const outline = e.target.closest('.outline-toggle');
       if (outline) {
         const wantOn = !!outline.checked;
@@ -399,8 +393,7 @@ export class UIPanel {
 
       // Height numeric input changed
       if (e.target === this.heightValue) {
-        let v = parseFloat(this.heightValue.value || '0') || 0;
-        v = Math.max(-10, Math.min(10, Math.round(v / 0.2) * 0.2));
+        const v = Math.max(-50, Math.min(50, parseInt(this.heightValue.value || '0', 10)));
         this.heightValue.value = v;
         const evt = new CustomEvent('height-set', { detail: { value: v } });
         this.panelElement.dispatchEvent(evt);
@@ -418,7 +411,7 @@ export class UIPanel {
         try {
           const data = JSON.parse(reader.result);
           const evt = new CustomEvent('load-project-data', { detail: { data, filename: file.name } });
-          this.panelElement.dispatchEvent(evt);
+        this.panelElement.dispatchEvent(evt);
         } catch {
           alert('Invalid save file (not JSON).');
         }
@@ -455,7 +448,7 @@ export class UIPanel {
       .panel-col { display: flex; flex-direction: column; gap: 10px; }
       .panel-row label { font-weight: 500; color: #ccc; }
       .panel-row input[type="number"] {
-        width: 80px; background: #111; border: 1px solid #444; color: #fff;
+        width: 64px; background: #111; border: 1px solid #444; color: #fff;
         padding: 8px; border-radius: 2px; text-align: center;
       }
       .panel-row span { color: #777; font-weight: bold; }
@@ -466,6 +459,8 @@ export class UIPanel {
       }
       .load-btn { background: #6a5acd; }
       .hint { opacity: 0.7; font-size: 12px; margin-top: 4px; }
+
+      /* pretty switch */
       .switch { position: relative; display: inline-block; width: 44px; height: 24px; margin-left: 6px; }
       .switch input { opacity: 0; width: 0; height: 0; }
       .slider {
@@ -481,6 +476,7 @@ export class UIPanel {
       input:checked + .slider { background: #00aaff; }
       input:checked + .slider:before { transform: translateX(20px); }
 
+      /* Terrain scroller */
       .terrain-scroller {
         display: flex; gap: 10px; overflow-x: auto; padding-bottom: 6px;
         -webkit-overflow-scrolling: touch;
