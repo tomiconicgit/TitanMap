@@ -17,9 +17,19 @@ export class UIPanel {
     this._addEventListeners();
   }
 
+  /** Public: let main.js reflect the Marker toggle state in the UI */
+  setMarkerToggle(on) {
+    if (this.markerToggleEl) {
+      this.markerToggleEl.checked = !!on;
+    }
+  }
+
   _createGridTabContent() {
-    const wrapper = document.createElement('div');
-    wrapper.className = 'panel-row';
+    const wrap = document.createElement('div');
+
+    // Row 1: grid size + generate
+    const row1 = document.createElement('div');
+    row1.className = 'panel-row';
 
     const label = document.createElement('label');
     label.textContent = 'Grid Size';
@@ -30,8 +40,8 @@ export class UIPanel {
     this.widthInput.min = 2;
     this.widthInput.max = 200;
 
-    const separator = document.createElement('span');
-    separator.textContent = '×';
+    const sep = document.createElement('span');
+    sep.textContent = '×';
 
     this.heightInput = document.createElement('input');
     this.heightInput.type = 'number';
@@ -43,8 +53,33 @@ export class UIPanel {
     this.generateButton.textContent = 'Generate';
     this.generateButton.className = 'generate-btn';
 
-    wrapper.append(label, this.widthInput, separator, this.heightInput, this.generateButton);
-    return wrapper;
+    row1.append(label, this.widthInput, sep, this.heightInput, this.generateButton);
+
+    // Row 2: Marker Mode toggle
+    const row2 = document.createElement('div');
+    row2.className = 'panel-row';
+    row2.style.marginTop = '8px';
+
+    const tlabel = document.createElement('label');
+    tlabel.textContent = 'Marker Mode';
+
+    const toggleWrap = document.createElement('label');
+    toggleWrap.className = 'switch';
+    this.markerToggleEl = document.createElement('input');
+    this.markerToggleEl.type = 'checkbox';
+    this.markerToggleEl.className = 'marker-toggle';
+    const slider = document.createElement('span');
+    slider.className = 'slider';
+    toggleWrap.append(this.markerToggleEl, slider);
+
+    const hint = document.createElement('span');
+    hint.className = 'muted';
+    hint.textContent = 'Tap tiles to mark red. Turning OFF locks them as non-walkable.';
+
+    row2.append(tlabel, toggleWrap, hint);
+
+    wrap.append(row1, row2);
+    return wrap;
   }
 
   _createSettingsTabContent() {
@@ -67,7 +102,7 @@ export class UIPanel {
 
     const hint = document.createElement('div');
     hint.className = 'hint';
-    hint.textContent = 'Saves include grid size, character tile, camera view, and editor settings.';
+    hint.textContent = 'Saves include grid size, character tile, camera view, settings, and markers.';
 
     wrap.append(row1, row2, hint);
     return wrap;
@@ -122,8 +157,9 @@ export class UIPanel {
       }
     });
 
-    // Grid: Generate
+    // Delegated click handlers in panel content
     this.contentElement.addEventListener('click', (e) => {
+      // Generate
       const genBtn = e.target.closest('.generate-btn');
       if (genBtn) {
         const width = Math.max(2, Math.min(200, parseInt(this.widthInput.value, 10) || 30));
@@ -133,7 +169,7 @@ export class UIPanel {
         return;
       }
 
-      // Settings: Save
+      // Save
       const saveBtn = e.target.closest('.save-btn');
       if (saveBtn) {
         let filename = window.prompt('Name your save file:', 'titanmap.json');
@@ -144,7 +180,7 @@ export class UIPanel {
         return;
       }
 
-      // Settings: Load
+      // Load (opens hidden file input)
       const loadBtn = e.target.closest('.load-btn');
       if (loadBtn) {
         this.fileInput.value = '';
@@ -152,7 +188,17 @@ export class UIPanel {
       }
     });
 
-    // Handle the hidden file input (Load)
+    // Marker toggle → tell main.js we want to change it
+    this.panelElement.addEventListener('change', (e) => {
+      const chk = e.target.closest('.marker-toggle');
+      if (!chk) return;
+      const wantOn = !!chk.checked;
+      const evt = new CustomEvent('marker-toggle-request', { detail: { wantOn } });
+      this.panelElement.dispatchEvent(evt);
+      // main.js will either accept or reject and may flip it back via setMarkerToggle()
+    });
+
+    // Hidden file input (Load)
     this.fileInput.addEventListener('change', () => {
       const file = this.fileInput.files && this.fileInput.files[0];
       if (!file) return;
@@ -203,6 +249,7 @@ export class UIPanel {
         padding: 8px; border-radius: 2px; text-align: center;
       }
       .panel-row span { color: #777; font-weight: bold; }
+      .muted { color: #8a8d92; font-weight: 400; font-size: 12px; }
       .generate-btn,
       .save-btn,
       .load-btn {
@@ -211,6 +258,22 @@ export class UIPanel {
       }
       .load-btn { background: #6a5acd; }
       .hint { opacity: 0.7; font-size: 12px; margin-top: 4px; }
+
+      /* pretty switch */
+      .switch { position: relative; display: inline-block; width: 44px; height: 24px; margin-left: 6px; }
+      .switch input { opacity: 0; width: 0; height: 0; }
+      .slider {
+        position: absolute; cursor: pointer; inset: 0;
+        background: #3a3d46; transition: .2s; border-radius: 999px;
+        box-shadow: inset 0 0 0 1px rgba(255,255,255,0.1);
+      }
+      .slider:before {
+        position: absolute; content: "";
+        height: 18px; width: 18px; left: 3px; top: 3px;
+        background: #fff; border-radius: 50%; transition: .2s;
+      }
+      input:checked + .slider { background: #00aaff; }
+      input:checked + .slider:before { transform: translateX(20px); }
     `;
     document.head.appendChild(style);
   }
