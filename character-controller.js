@@ -1,3 +1,4 @@
+// character-controller.js
 import * as THREE from 'three';
 import { tileToWorld } from './grid-utils.js';
 
@@ -8,8 +9,15 @@ export class CharacterController {
     this.speed = speed;
 
     this.path = [];
-    this.targetPosition = tileToWorld(startTx, startTz);
+    this.targetPosition = tileToWorld(startTx, startTz).clone();
     this.isMoving = false;
+
+    // ✅ Use the global PF that was attached by pathfinding-browser.js
+    const PF = (typeof window !== 'undefined') ? window.PF : null;
+    if (!PF) {
+      console.error('[CharacterController] Pathfinding library (PF) not found. ' +
+                    'Ensure pathfinding-browser.js is loaded before main.js.');
+    }
 
     this.pfGrid = new PF.Grid(10, 10);
     this.finder = new PF.AStarFinder({
@@ -19,14 +27,15 @@ export class CharacterController {
   }
 
   moveTo(tx, tz) {
+    // Don’t queue a new path while already moving
     if (this.isMoving || (tx === this.tilePos.tx && tz === this.tilePos.tz)) return;
     if (tx < 0 || tx > 9 || tz < 0 || tz > 9) return;
 
     const grid = this.pfGrid.clone();
     const start = this.tilePos;
-    
+
     const path = this.finder.findPath(start.tx, start.tz, tx, tz, grid);
-    
+
     if (path && path.length > 1) {
       this.path = path.slice(1);
       this.isMoving = true;
@@ -39,27 +48,32 @@ export class CharacterController {
       this.isMoving = false;
       return;
     }
-    const nextTile = this.path[0];
-    const worldPos = tileToWorld(nextTile[0], nextTile[1]);
+    const [nx, nz] = this.path[0];
+    const worldPos = tileToWorld(nx, nz);
     this.targetPosition.set(worldPos.x, this.mesh.position.y, worldPos.z);
   }
 
-  update(deltaTime) {
+  update(dt) {
     if (!this.isMoving) return;
 
-    const distance = this.mesh.position.distanceTo(this.targetPosition);
-    
-    if (distance < 0.05) {
-      this.tilePos = { tx: this.path[0][0], tz: this.path[0][1] };
+    const dist = this.mesh.position.distanceTo(this.targetPosition);
+
+    if (dist < 0.05) {
+      // Arrived at this tile -> advance
+      const [nx, nz] = this.path[0];
+      this.tilePos = { tx: nx, tz: nz };
       this.path.shift();
       if (this.path.length === 0) {
         this.isMoving = false;
         return;
       }
       this.setNextTarget();
+      return;
     }
 
-    const moveAmount = this.speed * deltaTime;
-    this.mesh.position.lerp(this.targetPosition, moveAmount / distance);
+    // Move toward target (clamp t so we never overshoot)
+    const step = this.speed * dt;
+    const t = Math.min(1, step / Math.max(1e-6, dist));
+    this.mesh.position.lerp(this.targetPosition, t);
   }
 }
