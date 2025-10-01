@@ -1,1 +1,199 @@
-(function(e){if("function"==typeof bootstrap)bootstrap("pf",e);else if("object"==typeof exports)module.exports=e();else if("function"==typeof define&&define.amd)define(e);else if("undefined"!=typeof ses){if(!ses.ok())return;ses.makePF=e}else"undefined"!=typeof window?window.PF=e():global.PF=e()})(function(){var e={};e.VERSION="0.4.2";var t=function(e,t,n){this.x=e;this.y=t;this.walkable=void 0===n?!0:n};var n=function(e,t){this.grid=e;this.heuristic=t||n.manhattan;this.diagonalMovement=1};n.manhattan=function(e,t){return Math.abs(e.x-t.x)+Math.abs(e.y-t.y)};n.euclidean=function(e,t){var n=e.x-t.x,r=e.y-t.y;return Math.sqrt(n*n+r*r)};n.chebyshev=function(e,t){return Math.max(Math.abs(e.x-t.x),Math.abs(e.y-t.y))};n.octile=function(e,t){var n=Math.abs(e.x-t.x),r=Math.abs(e.y-t.y);return 1.414213562373095*Math.min(n,r)+Math.abs(n-r)};n.prototype.findPath=function(e,t,n,r,i){var s,o,u,a,f,l,c,h,p=i.getNodeAt(e,t),d=i.getNodeAt(n,r),v=this.heuristic,m=this.diagonalMovement;for(p.g=0,p.f=0,p.opened=!0;!p.closed;){if(p.closed)continue;u=p.g;a=i.getNeighbors(p,m);for(f=0,l=a.length;f<l;++f){o=a[f];if(o.closed)continue;if(o===d)return o.parent=p,o.path();s=o.x-p.x;c=o.y-p.y;h=s===0||c===0?u+1:u+1.414213562373095;if(!o.opened||h<o.g){o.g=h;o.h=o.h||v(o,d);o.f=o.g+o.h;o.parent=p;if(!o.opened)p.push(o),o.opened=!0;else p.updateItem(o)}}p.closed=!0;if(p.size()===0)return[];p=p.pop()}return[]};var r=function(e){this.width=e.width;this.height=e.height;this.nodes=this._buildNodes(e.width,e.height,e.matrix)};r.prototype._buildNodes=function(e,n,r){var i,s,o=[],u;r=r||[];for(i=0;i<n;++i){o[i]=[];for(s=0;s<e;++s)u=void 0,r[i]&&r[i][s]&&(u=r[i][s]),o[i][s]=new t(s,i,u)}return o};r.prototype.getNodeAt=function(e,t){return this.nodes[t][e]};r.prototype.isWalkableAt=function(e,t){return this.isInside(e,t)&&this.nodes[t][e].walkable};r.prototype.isInside=function(e,t){return e>=0&&e<this.width&&t>=0&&t<this.height};r.prototype.setWalkableAt=function(e,t,n){this.nodes[t][e].walkable=n};r.prototype.getNeighbors=function(e,t){var n=e.x,r=e.y,i=[],s,o,u,a,f,l,c,h;s=!this.isWalkableAt(n,r-1);o=!this.isWalkableAt(n+1,r);u=!this.isWalkableAt(n,r+1);a=!this.isWalkableAt(n-1,r);if(t===1){f=s||o;l=o||u;c=u||a;h=a||s}else if(t===2)f=s&&o,l=o&&u,c=u&&a,h=a&&s;else if(t===3)f=s&&o,l=o&&u,c=u&&a,h=a&&s;s&&i.push(this.nodes[r-1][n]);o&&i.push(this.nodes[r][n+1]);u&&i.push(this.nodes[r+1][n]);a&&i.push(this.nodes[r][n-1]);if(t===0)return i;f||this.isWalkableAt(n+1,r-1)&&i.push(this.nodes[r-1][n+1]);l||this.isWalkableAt(n+1,r+1)&&i.push(this.nodes[r+1][n+1]);c||this.isWalkableAt(n-1,r+1)&&i.push(this.nodes[r+1][n-1]);h||this.isWalkableAt(n-1,r-1)&&i.push(this.nodes[r-1][n-1]);return i};r.prototype.clone=function(){var e=this.width,n=this.height,i=this.nodes,s,o,u,a=new r({width:e,height:n});for(s=0;s<n;++s)for(o=0;o<e;++o)u=i[s][o],a.nodes[s][o]=new t(u.x,u.y,u.walkable);return a};var i=function(){this.x=0;this.y=0;this.walkable=true};i.prototype=new t(0,0);i.prototype.path=function(){var e=this,t=[];while(e.parent){t.push(e);e=e.parent}return t.reverse()};t.prototype.push=function(){};t.prototype.pop=function(){};t.prototype.size=function(){};t.prototype.updateItem=function(){};var s=function(e){e=e||{};this.allowDiagonal=e.allowDiagonal;this.dontCrossCorners=e.dontCrossCorners;this.heuristic=e.heuristic||n.manhattan;this.weight=e.weight||1};s.prototype=new n;s.prototype.constructor=s;s.prototype.findPath=function(e,t,r,i,s){var o,u,a,f,l,c,h,p,d,v=s.getNodeAt(e,t),m=s.getNodeAt(r,i),g=this.heuristic,y=this.allowDiagonal,b=this.dontCrossCorners,w=this.weight,E=[],S=s.width,x=s.height,T;for(T=0;T<x;T++)E[T]=[],E[T].length=S;v.g=0;v.f=0;E[t][e]=v;for(v.opened=!0;!v.closed;){if(v.closed)continue;f=v.g;o=s.getNeighbors(v,y,b);for(c=0,h=o.length;c<h;++c){u=o[c];if(u.closed)continue;a=u.x;p=u.y;l=u.walkable?f+1:f;if(E[p]&&E[p][a]){d=E[p][a];if(l>=d.g)continue}else d=E[p][a]=new i(a,p);d.g=l;d.h=d.h||w*g(Math.abs(a-r),Math.abs(p-i));d.f=d.g+d.h;d.parent=v;if(!d.opened)v.push(d),d.opened=!0;else v.updateItem(d)}v.closed=!0;if(v.size()===0)return[];v=v.pop()}return[]};e.Node=t;e.Grid=r;e.Heuristic=n;e.AStarFinder=s;return e});
+/* pathfinding-browser.js (minimal, correct A* for browser)
+   Exposes: window.PF = { Grid, AStarFinder, Heuristic }
+*/
+(function () {
+  // ----- Heuristics -----
+  const Heuristic = {
+    manhattan: (dx, dy) => dx + dy,
+    euclidean: (dx, dy) => Math.hypot(dx, dy),
+    chebyshev: (dx, dy) => Math.max(dx, dy),
+    octile:    (dx, dy) => {
+      const F = Math.SQRT2 - 1;
+      return (dx < dy) ? F * dx + dy : F * dy + dx;
+    }
+  };
+
+  // ----- Grid / Node -----
+  class Node {
+    constructor(x, y, walkable = true) {
+      this.x = x; this.y = y;
+      this.walkable = walkable;
+      // for A*
+      this.f = 0; this.g = 0; this.h = 0;
+      this.opened = false; this.closed = false;
+      this.parent = null;
+    }
+  }
+
+  class Grid {
+    constructor(opt) {
+      // accepts {width, height} or (w, h) for convenience
+      const w = (typeof opt === 'object') ? opt.width : arguments[0];
+      const h = (typeof opt === 'object') ? opt.height : arguments[1];
+      this.width = w|0; this.height = h|0;
+      this.nodes = new Array(this.height);
+      for (let y = 0; y < this.height; y++) {
+        this.nodes[y] = new Array(this.width);
+        for (let x = 0; x < this.width; x++) {
+          this.nodes[y][x] = new Node(x, y, true);
+        }
+      }
+    }
+    getNodeAt(x, y) { return this.nodes[y][x]; }
+    isInside(x, y) { return x >= 0 && x < this.width && y >= 0 && y < this.height; }
+    isWalkableAt(x, y) { return this.isInside(x, y) && this.nodes[y][x].walkable; }
+    setWalkableAt(x, y, walkable) { if (this.isInside(x, y)) this.nodes[y][x].walkable = !!walkable; }
+    clone() {
+      const g = new Grid({ width: this.width, height: this.height });
+      for (let y = 0; y < this.height; y++) {
+        for (let x = 0; x < this.width; x++) {
+          g.nodes[y][x].walkable = this.nodes[y][x].walkable;
+        }
+      }
+      return g;
+    }
+    getNeighbors(node, allowDiagonal = true, dontCrossCorners = true) {
+      const x = node.x, y = node.y;
+      const neighbors = [];
+
+      // orthogonal
+      const up    = [x, y - 1], down  = [x, y + 1],
+            left  = [x - 1, y], right = [x + 1, y];
+
+      const canUp    = this.isWalkableAt(up[0], up[1]);
+      const canDown  = this.isWalkableAt(down[0], down[1]);
+      const canLeft  = this.isWalkableAt(left[0], left[1]);
+      const canRight = this.isWalkableAt(right[0], right[1]);
+
+      if (canUp)    neighbors.push(this.getNodeAt(up[0], up[1]));
+      if (canRight) neighbors.push(this.getNodeAt(right[0], right[1]));
+      if (canDown)  neighbors.push(this.getNodeAt(down[0], down[1]));
+      if (canLeft)  neighbors.push(this.getNodeAt(left[0], left[1]));
+
+      if (!allowDiagonal) return neighbors;
+
+      // diagonals
+      const u = canUp, d = canDown, l = canLeft, r = canRight;
+
+      // If crossing corners is disallowed, at least one of the adjacent orthogonal tiles must be walkable.
+      const diagOK = (okA, okB) => dontCrossCorners ? (okA || okB) : (okA && okB);
+
+      const uL = [x - 1, y - 1], uR = [x + 1, y - 1],
+            dL = [x - 1, y + 1], dR = [x + 1, y + 1];
+
+      if (this.isWalkableAt(uL[0], uL[1]) && diagOK(u, l)) neighbors.push(this.getNodeAt(uL[0], uL[1]));
+      if (this.isWalkableAt(uR[0], uR[1]) && diagOK(u, r)) neighbors.push(this.getNodeAt(uR[0], uR[1]));
+      if (this.isWalkableAt(dL[0], dL[1]) && diagOK(d, l)) neighbors.push(this.getNodeAt(dL[0], dL[1]));
+      if (this.isWalkableAt(dR[0], dR[1]) && diagOK(d, r)) neighbors.push(this.getNodeAt(dR[0], dR[1]));
+
+      return neighbors;
+    }
+  }
+
+  // ----- A* -----
+  class AStarFinder {
+    constructor(opts = {}) {
+      this.allowDiagonal  = !!opts.allowDiagonal;
+      this.dontCrossCorners = !!opts.dontCrossCorners;
+      this.heuristicFn    = opts.heuristic || Heuristic.manhattan;
+      this.weight         = Number(opts.weight || 1);
+    }
+
+    findPath(sx, sy, ex, ey, grid) {
+      const start = grid.getNodeAt(sx, sy);
+      const goal  = grid.getNodeAt(ex, ey);
+      if (!start || !goal || !start.walkable || !goal.walkable) return [];
+
+      // binary heap (min-heap by f)
+      const open = [];
+      const pushOpen = (n) => {
+        open.push(n);
+        let i = open.length - 1;
+        while (i > 0) {
+          const p = ((i - 1) >> 1);
+          if (open[p].f <= open[i].f) break;
+          [open[i], open[p]] = [open[p], open[i]];
+          i = p;
+        }
+      };
+      const popOpen = () => {
+        const top = open[0], last = open.pop();
+        if (open.length) {
+          open[0] = last;
+          // down-heap
+          let i = 0;
+          while (true) {
+            const l = i * 2 + 1, r = l + 1;
+            let m = i;
+            if (l < open.length && open[l].f < open[m].f) m = l;
+            if (r < open.length && open[r].f < open[m].f) m = r;
+            if (m === i) break;
+            [open[i], open[m]] = [open[m], open[i]];
+            i = m;
+          }
+        }
+        return top;
+      };
+
+      start.g = 0;
+      start.h = this.heuristicFn(Math.abs(ex - sx), Math.abs(ey - sy)) * this.weight;
+      start.f = start.g + start.h;
+      pushOpen(start);
+      start.opened = true;
+
+      while (open.length) {
+        const node = popOpen();
+        node.closed = true;
+
+        if (node === goal) {
+          // reconstruct
+          const path = [];
+          let cur = node;
+          while (cur) {
+            path.push([cur.x, cur.y]);
+            cur = cur.parent;
+          }
+          return path.reverse();
+        }
+
+        const neighbors = grid.getNeighbors(node, this.allowDiagonal, this.dontCrossCorners);
+        for (let i = 0; i < neighbors.length; i++) {
+          const nb = neighbors[i];
+          if (nb.closed || !nb.walkable) continue;
+
+          const dx = nb.x - node.x;
+          const dy = nb.y - node.y;
+          const cost = (dx === 0 || dy === 0) ? 1 : Math.SQRT2; // straight or diagonal
+
+          const gScore = node.g + cost;
+          const beenOpened = nb.opened;
+
+          if (!beenOpened || gScore < nb.g) {
+            nb.g = gScore;
+            nb.h = nb.h || this.heuristicFn(Math.abs(ex - nb.x), Math.abs(ey - nb.y)) * this.weight;
+            nb.f = nb.g + nb.h;
+            nb.parent = node;
+
+            if (!beenOpened) {
+              pushOpen(nb);
+              nb.opened = true;
+            } else {
+              // re-heapify: simple approach reinsert (cheap for small sets)
+              // remove nb from open if exists, then push again
+              const idx = open.indexOf(nb);
+              if (idx >= 0) { open.splice(idx, 1); }
+              pushOpen(nb);
+            }
+          }
+        }
+      }
+
+      return [];
+    }
+  }
+
+  // Expose
+  const PF = { Grid, AStarFinder, Heuristic };
+  if (typeof window !== 'undefined') window.PF = PF;
+  else if (typeof global !== 'undefined') global.PF = PF;
+})();
