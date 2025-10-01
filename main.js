@@ -5,6 +5,15 @@ import { createCamera } from './camera.js';
 import { createCharacter } from './character.js';
 import { UIPanel } from './ui-panel.js';
 
+// Convert tile index (tx, tz) to world center on the single plane
+function tileToWorld(tx, tz, gridWidth, gridHeight) {
+  const halfW = gridWidth / 2;
+  const halfH = gridHeight / 2;
+  const x = tx - halfW + 0.5; // center of the tile
+  const z = tz - halfH + 0.5;
+  return { x, z };
+}
+
 function init() {
   // --- Scene / renderer ---
   const scene = new THREE.Scene();
@@ -24,7 +33,6 @@ function init() {
   // --- Character FIRST ---
   const character = createCharacter();
   scene.add(character);
-  character.position.set(0, 0.35, 0);
 
   // --- Landscape (single solid mesh) ---
   let terrainMesh = null;
@@ -35,7 +43,6 @@ function init() {
   let showOutlines = false;
 
   function rebuildEdges() {
-    // remove old overlay
     if (edgesMesh) {
       scene.remove(edgesMesh);
       edgesMesh.geometry?.dispose?.();
@@ -47,7 +54,7 @@ function init() {
     const w = gridWidth | 0;
     const h = gridHeight | 0;
 
-    // Build true 1×1 tile lines in plane-local XY, z=0
+    // Build lines along every integer step in plane-local XY, z=0
     const verts = [];
     const xMin = -w / 2, xMax = w / 2;
     const yMin = -h / 2, yMax = h / 2;
@@ -69,7 +76,7 @@ function init() {
     const mat = new THREE.LineBasicMaterial({ color: 0x00aaff });
     edgesMesh = new THREE.LineSegments(geo, mat);
 
-    // Match the plane’s transform (plane rotated -PI/2 on X => XY -> XZ)
+    // Match plane transform (plane rotated -PI/2 on X)
     edgesMesh.position.copy(terrainMesh.position);
     edgesMesh.rotation.copy(terrainMesh.rotation);
     edgesMesh.position.y += 0.001; // avoid z-fighting
@@ -89,7 +96,7 @@ function init() {
       terrainMesh = null;
     }
 
-    // Size = tiles, Segments = tiles (each tile is a quad between vertices)
+    // Size = tiles, Segments = tiles (each tile is a quad)
     const geo = new THREE.PlaneGeometry(gridWidth, gridHeight, gridWidth, gridHeight);
     const mat = new THREE.MeshStandardMaterial({
       color: 0x777777,
@@ -102,11 +109,15 @@ function init() {
     terrainMesh.name = `Terrain_${gridWidth}x${gridHeight}`;
     scene.add(terrainMesh);
 
-    // reset character to center
-    character.position.set(0, 0.35, 0);
+    // Center the ball on an actual tile center (choose middle-ish tile)
+    const tx = Math.floor(gridWidth / 2);
+    const tz = Math.floor(gridHeight / 2);
+    const { x, z } = tileToWorld(tx, tz, gridWidth, gridHeight);
+    character.position.set(x, 0.35, z);
 
-    controls.target.set(0, 0, 0);
-    camera.position.set(3, 6, 9);
+    // Focus camera on that tile
+    controls.target.set(x, 0, z);
+    camera.position.set(x + 3, 6, z + 9);
     controls.update();
 
     rebuildEdges();
@@ -186,7 +197,6 @@ function init() {
   };
 }
 
-// Run immediately (robust with modules)
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', init, { once: true });
 } else {
