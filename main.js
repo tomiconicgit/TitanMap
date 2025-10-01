@@ -22,8 +22,12 @@ window.onload = function () {
   markerGroup.name = 'MarkerLayer';
   const markedTiles = new Map(); // key "x,y" -> mesh
 
-  // Current terrain selection (from Terrain tab)
-  let currentTerrain = 'sand';
+  // Terrain Painting Mode
+  let paintingMode = false;
+  let currentPaintType = null; // 'sand'|'dirt'|'grass'|'stone'|'gravel'|'water'|null
+  const terrainGroup = new THREE.Group();
+  terrainGroup.name = 'TerrainPaint';
+  const paintedTiles = new Map(); // key -> mesh
 
   // Scene
   const scene = new THREE.Scene();
@@ -33,6 +37,7 @@ window.onload = function () {
   dirLight.position.set(5, 10, 7.5);
   scene.add(dirLight);
   scene.add(markerGroup);
+  scene.add(terrainGroup);
 
   // Character & controller
   const character = createCharacter();
@@ -72,8 +77,9 @@ window.onload = function () {
     groundPlane.frustumCulled = false;
     scene.add(groundPlane);
 
-    // Clear markers when grid changes
+    // Clear markers & painted tiles on grid change
     clearAllMarkers();
+    clearAllPainted();
 
     controller.updateGridSize(width, height);
 
@@ -96,15 +102,51 @@ window.onload = function () {
     regenerateWorld(width, height);
   });
 
-  // Terrain selection handler
+  // When Terrain tab is opened: ensure NO selection and turn painting OFF + unfreeze
+  uiPanel.panelElement.addEventListener('terrain-tab-opened', () => {
+    if (paintingMode) {
+      paintingMode = false;
+      currentPaintType = null;
+      uiPanel.clearTerrainSelection();
+      setFreeze(false, /*disableUI*/ false);
+    } else {
+      // Even if not painting, make sure UI shows nothing selected
+      uiPanel.clearTerrainSelection();
+    }
+  });
+
+  // Terrain selection toggling
   uiPanel.panelElement.addEventListener('terrain-select', (e) => {
-    currentTerrain = e.detail?.type || 'sand';
+    const { type, active } = e.detail || {};
+    if (!type) return;
+
+    if (active) {
+      // If marker mode is on, turn it off first (spec synergy)
+      if (markerMode) {
+        markerMode = false;
+        uiPanel.setMarkerToggle(false);
+      }
+      currentPaintType = type;
+      paintingMode = true;
+      setFreeze(true, /*disableUI*/ true); // freeze move while painting
+    } else {
+      // stop painting
+      paintingMode = false;
+      currentPaintType = null;
+      setFreeze(false, /*disableUI*/ false);
+    }
   });
 
   // ===== Marker Mode drives Freeze =====
   uiPanel.panelElement.addEventListener('marker-toggle-request', (e) => {
     const { wantOn } = e.detail || {};
     if (wantOn) {
+      // If painting, stop it first
+      if (paintingMode) {
+        paintingMode = false;
+        currentPaintType = null;
+        uiPanel.clearTerrainSelection();
+      }
       markerMode = true;
       setFreeze(true, /*disableUI*/ true);
     } else {
@@ -114,7 +156,7 @@ window.onload = function () {
     }
   });
 
-  // SAVE (includes markers)
+  // SAVE (includes markers; painting data not serialized yet)
   uiPanel.panelElement.addEventListener('save-project', (e) => {
     const { filename } = e.detail || {};
     const data = getProjectData();
@@ -159,6 +201,7 @@ window.onload = function () {
     const { tx, tz } = worldToTile(hit[0].point, gridWidth, gridHeight);
 
     if (markerMode) { addMarker(tx, tz); return; }
+    if (paintingMode && currentPaintType) { paintTile(tx, tz, currentPaintType); return; }
     if (freezeTapToMove) return;
 
     controller.moveTo(tx, tz);
@@ -207,10 +250,51 @@ window.onload = function () {
   function clearAllMarkers() {
     for (const [, mesh] of markedTiles) {
       markerGroup.remove(mesh);
-      mesh.geometry.dispose();
-      mesh.material.dispose();
+      mesh.geometry?.dispose?.();
+      mesh.material?.dispose?.();
     }
     markedTiles.clear();
+  }
+
+  // -------- Terrain painting --------
+  const MATERIALS = {
+    sand:   new THREE.MeshStandardMaterial({ color: 0xD8C6A3, roughness: 0.95, metalness: 0.0, flatShading: true }),
+    dirt:   new THREE.MeshStandardMaterial({ color: 0x6F451F, roughness: 0.95, metalness: 0.0, flatShading: true }),
+    grass:  new THREE.MeshStandardMaterial({ color: 0x2E7D32, roughness: 0.9,  metalness: 0.0, flatShading: true }),
+    stone:  new THREE.MeshStandardMaterial({ color: 0x7D7D7D, roughness: 1.0,  metalness: 0.0, flatShading: true }),
+    gravel: new THREE.MeshStandardMaterial({ color: 0x9A9A9A, roughness: 0.95, metalness: 0.0, flatShading: true }),
+    water:  new THREE.MeshStandardMaterial({ color: 0x2C6CC4, roughness: 0.2,  metalness: 0.0, transparent: true, opacity: 0.8 })
+  };
+
+  function paintTile(tx, tz, type) {
+    if (tx < 0 || tx >= gridWidth || tz < 0 || tz >= gridHeight) return;
+    const key = tileKey(tx, tz);
+
+    // Replace existing mesh for this tile if present
+    const old = paintedTiles.get(key);
+    if (old) {
+      old.material = MATERIALS[type];
+      return;
+    }
+
+    const geo = new THREE.PlaneGeometry(1, 1);
+    const mat = MATERIALS[type];
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.rotation.x = -Math.PI / 2;
+    const wp = tileToWorld(tx, tz, gridWidth, gridHeight);
+    mesh.position.set(wp.x, 0.015, wp.z); // slightly above grid
+    mesh.name = `Tile_${key}_${type}`;
+    terrainGroup.add(mesh);
+    paintedTiles.set(key, mesh);
+  }
+
+  function clearAllPainted() {
+    for (const [, mesh] of paintedTiles) {
+      terrainGroup.remove(mesh);
+      mesh.geometry?.dispose?.();
+      // materials are shared; don't dispose shared MATERIALS here
+    }
+    paintedTiles.clear();
   }
 
   // -------- Save/Load helpers --------
@@ -220,7 +304,7 @@ window.onload = function () {
     const markers = [...markedTiles.keys()].map(k => k.split(',').map(Number));
 
     return {
-      version: 4,
+      version: 5,
       timestamp: Date.now(),
       grid: { width: gridWidth, height: gridHeight },
       character: { tx: charTx, tz: charTz },
@@ -233,7 +317,8 @@ window.onload = function () {
         markerMode: !!markerMode
       },
       markers,
-      terrain: { selected: currentTerrain }
+      terrain: { paintingMode: !!paintingMode, selected: currentPaintType }
+      // (Painted tiles can be serialized later if you want)
     };
   }
 
@@ -246,7 +331,9 @@ window.onload = function () {
     const tz = Math.max(0, Math.min(h - 1, Number(data.character?.tz) ?? Math.floor(h / 2)));
     controller.resetTo(tx, tz);
 
-    markerMode = false;
+    // After load, painting/marker modes default off for safety
+    paintingMode = false; currentPaintType = null; uiPanel.clearTerrainSelection();
+    markerMode = false;  uiPanel.setMarkerToggle(false);
     clearAllMarkers();
     if (Array.isArray(data.markers)) {
       for (const pair of data.markers) {
@@ -259,11 +346,6 @@ window.onload = function () {
     }
 
     setFreeze(!!data.settings?.freezeTapToMove, /*disableUI*/ false);
-
-    // Terrain selection
-    if (data.terrain?.selected) {
-      currentTerrain = String(data.terrain.selected);
-    }
 
     if (Array.isArray(data.camera?.position) && Array.isArray(data.camera?.target)) {
       const [cx, cy, cz] = data.camera.position;
@@ -326,7 +408,11 @@ window.onload = function () {
 
     freezeCheckboxEl = hud.querySelector('#freezeMoveToggle');
     freezeCheckboxEl.addEventListener('change', () => {
-      if (markerMode) { freezeCheckboxEl.checked = true; return; }
+      // While marking or painting, freeze is locked ON — ignore manual changes
+      if (markerMode || paintingMode) {
+        freezeCheckboxEl.checked = true;
+        return;
+      }
       freezeTapToMove = freezeCheckboxEl.checked;
     });
   }
@@ -337,7 +423,7 @@ window.onload = function () {
       freezeCheckboxEl.checked = freezeTapToMove;
       freezeCheckboxEl.disabled = !!disableUI;
       freezeCheckboxEl.parentElement.title = disableUI
-        ? 'Freeze is locked ON while Marker Mode is active'
+        ? 'Locked ON while Marker or Paint Mode is active'
         : 'Freeze tap-to-move';
     }
   }
