@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import Viewport from './viewport.js';
 import { createCamera } from './camera.js';
 import { createGrid } from './grid.js';
-import { createCharacter } from './character.js'; // 1. Import the character module
+import { createCharacter } from './character.js';
+import { tileToWorld } from './grid-utils.js'; // 1. Import the new utility
 
 // Create a scene
 const scene = new THREE.Scene();
@@ -19,10 +20,17 @@ scene.add(directionalLight);
 const grid = createGrid();
 scene.add(grid);
 
-// 2. Create the character and add it to the scene
+// Create the character
 const character = createCharacter();
-character.position.set(2, 0.01, 1); // Place it on a specific tile
 scene.add(character);
+
+// 2. Define character's position in TILE coordinates (from 0 to 9)
+const characterTilePos = { tx: 6, tz: 5 };
+
+// 3. Convert tile coordinates to world position and place the character
+const worldPos = tileToWorld(characterTilePos.tx, characterTilePos.tz);
+character.position.set(worldPos.x, 0.01, worldPos.z);
+
 
 // Initialize the viewport
 const viewport = new Viewport(); 
@@ -34,11 +42,8 @@ const { camera, controls } = createCamera(viewport.renderer.domElement);
 viewport.scene = scene;
 viewport.camera = camera;
 
-// 3. Update the camera target in the render loop
+// Update the camera target in the render loop
 viewport.onBeforeRender = () => {
-  // Make the camera's orbit center follow the character's position
   controls.target.copy(character.position);
-  
-  // This MUST be called after updating the target
   controls.update(); 
 };
