@@ -12,25 +12,28 @@ import { HeightTool } from './height-tool.js';
 
 window.onload = function () {
   let gridWidth, gridHeight;
-  let gridGroup, terrainMesh; // Changed groundPlane to terrainMesh
+  let gridGroup, terrainMesh;
 
-  // ... (freeze toggle, marker mode are fine)
+  let freezeTapToMove = false;
+  let freezeCheckboxEl = null;
 
-  // -- REFACTORED Terrain State --
+  let markerMode = false;
+  const markerGroup = new THREE.Group();
+  markerGroup.name = 'MarkerLayer';
+  const markedTiles = new Map();
+
+  // --- REFACTORED TERRAIN STATE ---
   let paintingMode = false;
   let currentPaintType = null;
-  // This map now stores DATA ('grass', 'sand'), not meshes.
-  const paintedTileData = new Map();
-  // Water meshes are special and are still separate objects.
-  const waterMeshes = new Map();
+  const paintedTileData = new Map(); // Stores data ('grass', 'sand'), not meshes.
+  const waterMeshes = new Map();     // Water tiles are still separate objects.
 
-  // Height tool state
   let heightMode = false;
   let pinMode = false;
   let currentHeightValue = 0;
   let heightTool = null;
 
-  // Scene
+  // --- SCENE SETUP ---
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x111318);
   scene.add(new THREE.AmbientLight(0xffffff, 0.55));
@@ -38,30 +41,33 @@ window.onload = function () {
   dirLight.position.set(5, 10, 7.5);
   scene.add(dirLight);
   scene.add(markerGroup);
-  // REMOVED: scene.add(terrainGroup);
 
-  // ... (character & controller, viewport & camera are fine)
+  const character = createCharacter();
+  const controller = new CharacterController(character, 0, 0);
+  scene.add(character);
+
+  const viewport = new Viewport();
+  const { camera, controls } = createCamera(viewport.renderer.domElement);
+  viewport.scene = scene;
+  viewport.camera = camera;
 
   const WATER_NORMALS_URL = './textures/waternormals.jpg';
   const waterNormals = new THREE.TextureLoader().load(WATER_NORMALS_URL, (tex) => {
     tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   });
 
-  // -- MODIFIED World Generation --
+  // --- WORLD GENERATION (MODIFIED) ---
   function regenerateWorld(width, height) {
     gridWidth = width;
     gridHeight = height;
 
     if (gridGroup) scene.remove(gridGroup);
-    if (terrainMesh) scene.remove(terrainMesh); // Remove old terrain mesh
+    if (terrainMesh) scene.remove(terrainMesh);
 
     gridGroup = createGrid(width, height);
     scene.add(gridGroup);
 
-    // --- Create the single, unified terrain mesh ---
     const terrainGeo = new THREE.PlaneGeometry(width, height, width, height);
-    
-    // Initialize default vertex colors
     const colors = [];
     const defaultColor = new THREE.Color(0x888888);
     for (let i = 0; i < terrainGeo.attributes.position.count; i++) {
@@ -69,23 +75,18 @@ window.onload = function () {
     }
     terrainGeo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
     
-    // Use a material that supports vertex colors
     const terrainMat = new THREE.MeshStandardMaterial({
         vertexColors: true,
-        flatShading: false, // Set to false for smooth slopes!
-        roughness: 0.9,
-        metalness: 0.1
+        flatShading: false, // Use smooth shading for better slopes
     });
 
     terrainMesh = new THREE.Mesh(terrainGeo, terrainMat);
     terrainMesh.rotation.x = -Math.PI / 2;
     terrainMesh.name = 'TerrainMesh';
     scene.add(terrainMesh);
-    // ---------------------------------------------------
 
     clearAllPainted();
 
-    // Init/Reset height tool with the new terrain mesh
     if (!heightTool) {
       heightTool = new HeightTool(scene, terrainMesh, width, height);
     } else {
@@ -104,9 +105,10 @@ window.onload = function () {
     controls.update();
   }
 
-  // ... (UI Panel event listeners are mostly fine)
+  // ... (UI Panel event listeners are fine)
+  // ...
 
-  // --- MODIFIED Tap/Drag handling ---
+  // --- INPUT HANDLING (MODIFIED) ---
   const raycaster = new THREE.Raycaster();
   const ndc = new THREE.Vector2();
   const downPos = new THREE.Vector2();
@@ -122,7 +124,6 @@ window.onload = function () {
     ndc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
 
     raycaster.setFromCamera(ndc, camera);
-    // Intersect with the new terrain mesh
     const hit = raycaster.intersectObject(terrainMesh, false);
     if (hit.length === 0) return;
 
@@ -144,7 +145,7 @@ window.onload = function () {
     controller.moveTo(tx, tz);
   });
 
-  // --- MODIFIED Water Tick ---
+  // --- RENDER LOOP (MODIFIED) ---
   const lastCharPos = new THREE.Vector3();
   const delta = new THREE.Vector3();
 
@@ -157,11 +158,9 @@ window.onload = function () {
       controls.target.add(delta);
     }
 
-    // Tick water meshes
     if (waterMeshes.size > 0) {
       for (const w of waterMeshes.values()) {
-        const u = w.material?.uniforms;
-        if (u && u.time) u.time.value += dt;
+        w.material.uniforms['time'].value += dt;
       }
     }
 
@@ -173,9 +172,9 @@ window.onload = function () {
 
   function tileKey(x, y) { return `${x},${y}`; }
 
-  // ... (addMarker and clearAllMarkers are fine)
+  // ... (addMarker, clearAllMarkers are fine)
+  // ...
 
-  // --- REPLACED Terrain painting materials with simple colors ---
   const MATERIALS = {
     sand:   { color: new THREE.Color(0xD8C6A3) },
     dirt:   { color: new THREE.Color(0x6F451F) },
@@ -184,16 +183,31 @@ window.onload = function () {
     gravel: { color: new THREE.Color(0x9A9A9A) },
   };
 
-  // createWaterTile is almost the same, but we add it to the scene directly
+  // --- FULLY IMPLEMENTED createWaterTile ---
   function createWaterTile(tx, tz) {
-      // ... (implementation from your main.js is fine)
-      const geo = new THREE.PlaneGeometry(1, 1);
-      const water = new Water(geo, { /* ... options ... */ });
-      // ... position it etc ...
-      return water;
+    const geo = new THREE.PlaneGeometry(1, 1);
+    const water = new Water(geo, {
+      textureWidth: 256,
+      textureHeight: 256,
+      waterNormals,
+      sunDirection: dirLight.position.clone().normalize(),
+      sunColor: 0xffffff,
+      waterColor: 0x2066cc,
+      distortionScale: 1.85,
+      fog: !!scene.fog
+    });
+    water.rotation.x = -Math.PI / 2;
+    const wp = tileToWorld(tx, tz, gridWidth, gridHeight);
+    water.position.set(wp.x, 0.02, wp.z); // Position slightly above base terrain
+    if (water.material.uniforms.size) {
+      water.material.uniforms.size.value = 10.0;
+    }
+    water.userData.type = 'water';
+    water.name = `Water_${tx},${tz}`;
+    return water;
   }
 
-  // --- REWRITTEN Paint Function ---
+  // --- PAINT FUNCTION (REWRITTEN) ---
   function paintTile(tx, tz, type) {
     if (tx < 0 || tx >= gridWidth || tz < 0 || tz >= gridHeight) return;
     const key = tileKey(tx, tz);
@@ -201,7 +215,6 @@ window.onload = function () {
     const oldType = paintedTileData.get(key);
     if (oldType === type) return;
 
-    // If there was an old water mesh at this location, remove it
     if (waterMeshes.has(key)) {
         const oldWater = waterMeshes.get(key);
         scene.remove(oldWater);
@@ -211,7 +224,7 @@ window.onload = function () {
     }
 
     if (type === 'water') {
-        const water = createWaterTile(tx, tz); // This function is from your existing code
+        const water = createWaterTile(tx, tz);
         scene.add(water);
         waterMeshes.set(key, water);
     } else {
@@ -220,7 +233,6 @@ window.onload = function () {
         const terrainColors = terrainMesh.geometry.attributes.color;
         const widthSegments = gridWidth;
 
-        // The vertices are laid out like a grid. We find the 4 corners for our tile.
         const v_tl = (tz) * (widthSegments + 1) + (tx);
         const v_tr = (tz) * (widthSegments + 1) + (tx + 1);
         const v_bl = (tz + 1) * (widthSegments + 1) + (tx);
@@ -232,14 +244,12 @@ window.onload = function () {
         terrainColors.setXYZ(v_br, color.r, color.g, color.b);
         terrainColors.needsUpdate = true;
     }
-
     paintedTileData.set(key, type);
   }
 
-  // --- REWRITTEN Clear Function ---
+  // --- CLEAR FUNCTION (REWRITTEN) ---
   function clearAllPainted() {
     paintedTileData.clear();
-    
     for (const [, mesh] of waterMeshes) {
       scene.remove(mesh);
       mesh.geometry?.dispose?.();
@@ -247,7 +257,6 @@ window.onload = function () {
     }
     waterMeshes.clear();
     
-    // Reset the main terrain mesh colors
     if (terrainMesh) {
         const colors = terrainMesh.geometry.attributes.color;
         const defaultColor = new THREE.Color(0x888888);
@@ -258,8 +267,8 @@ window.onload = function () {
     }
   }
 
-  // ... The rest of your main.js (save/load, HUD) will need updates to handle the new data format,
-  // but these changes fix the core visual and interactive problems.
-  // getProjectData needs to save heightTool.heights and paintedTileData.
-  // applyProjectData needs to load them and call heightTool.applyHeightsToMesh() and repaint the tiles.
+  // The rest of your main.js file (save/load functions, HUD functions) goes here...
+  // Note: Your save/load functions will need to be updated to handle the new data structures.
+  // getProjectData() should now save `heightTool.heights` and the `paintedTileData` map.
+  // applyProjectData() should load them, repaint the tiles, and call `heightTool.applyHeightsToMesh()`.
 };
