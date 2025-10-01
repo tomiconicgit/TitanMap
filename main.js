@@ -43,6 +43,10 @@ window.onload = function () {
   viewport.scene = scene;
   viewport.camera = camera;
 
+  // --- FOLLOW: keep camera & target translating with the character ---
+  const lastCharPos = character.position.clone();
+  const moveDelta = new THREE.Vector3();
+
   // 5) Tap-to-move (tap, not drag)
   const raycaster = new THREE.Raycaster();
   const ndc = new THREE.Vector2();
@@ -58,7 +62,7 @@ window.onload = function () {
     const up = new THREE.Vector2(e.clientX, e.clientY);
     if (downPos.distanceTo(up) > 5) return;
 
-    // Raycast the (invisible) ground
+    // Raycast to the (invisible) ground
     const rect = canvas.getBoundingClientRect();
     ndc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
     ndc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
@@ -71,15 +75,22 @@ window.onload = function () {
     controller.moveTo(tx, tz);
   });
 
-  // 6) Loop — follow the character + keep controls responsive
+  // 6) Loop — controller update, then translate camera by character delta
   viewport.onBeforeRender = (dt) => {
     controller.update(dt);
 
-    // Lock the orbit focus to the character so the camera follows.
-    // (Do this every frame so it stays glued while the character moves.)
-    controls.target.copy(character.position);
+    // How far did the character move this frame?
+    moveDelta.subVectors(character.position, lastCharPos);
 
-    // Smooth orbit/zoom/tilt
+    if (moveDelta.lengthSq() > 0) {
+      // Shift both camera and orbit target by the same amount.
+      camera.position.add(moveDelta);
+      controls.target.add(moveDelta);
+
+      lastCharPos.copy(character.position);
+    }
+
+    // Keep OrbitControls responsive (damping, user orbit/zoom/tilt)
     controls.update();
   };
 };
