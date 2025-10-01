@@ -18,37 +18,30 @@ export class HeightTool {
     this.gridWidth = gridWidth;
     this.gridHeight = gridHeight;
 
-    // Data model for vertex heights. Matches the vertex order in the PlaneGeometry.
     this.heights = new Float32Array((this.gridWidth + 1) * (this.gridHeight + 1)).fill(0);
-    this.pinned = new Set(); // Stores tile keys "x,y"
+    this.pinned = new Set();
 
-    // Visual layer for pinned tiles
     this.pinGroup = new THREE.Group();
     this.pinGroup.name = 'PinnedTilesOverlay';
     scene.add(this.pinGroup);
-    this.pinMeshes = new Map(); // key -> mesh
+    this.pinMeshes = new Map();
 
-    // Apply the initial zeroed heights to the mesh upon creation.
     this.applyHeightsToMesh();
   }
 
-  /** Get the index in the heights array for a given vertex coordinate. */
   idx(vx, vz) { return vz * (this.gridWidth + 1) + vx; }
 
-  /** Get the string key for a tile coordinate. */
   tileKey(tx, tz) { return `${tx},${tz}`; }
 
-  /** Reset the manager with a new grid size and terrain mesh. */
   reset(terrainMesh, width, height) {
     this.terrainMesh = terrainMesh;
     this.gridWidth = width;
     this.gridHeight = height;
     this.heights = new Float32Array((width + 1) * (height + 1)).fill(0);
     this.removeAllPins();
-    this.applyHeightsToMesh(); // Ensure the new mesh is flattened
+    this.applyHeightsToMesh();
   }
 
-  /** Clear all pins & overlays */
   removeAllPins() {
     for (const [, m] of this.pinMeshes) {
       this.pinGroup.remove(m);
@@ -59,7 +52,6 @@ export class HeightTool {
     this.pinned.clear();
   }
   
-  /** Toggle a pin for a tile. */
   togglePin(tx, tz) {
     if (tx < 0 || tz < 0 || tx >= this.gridWidth || tz >= this.gridHeight) return false;
     const key = this.tileKey(tx, tz);
@@ -97,7 +89,6 @@ export class HeightTool {
     }
   }
 
-  /** Checks if any of the four tiles sharing a vertex are pinned. */
   nodeIsBlocked(vx, vz) {
     const tiles = [
       [vx - 1, vz - 1], [vx, vz - 1],
@@ -109,15 +100,14 @@ export class HeightTool {
     return false;
   }
 
-  /** Set a tile's 4 corner vertices to a specific height. */
   setTileHeight(tx, tz, value) {
     if (tx < 0 || tz < 0 || tx >= this.gridWidth || tz >= this.gridHeight) return;
 
     const vertices = [
-      [tx,     tz],     // Top-Left vertex of the tile
-      [tx + 1, tz],     // Top-Right
-      [tx,     tz + 1], // Bottom-Left
-      [tx + 1, tz + 1]  // Bottom-Right
+      [tx,     tz],
+      [tx + 1, tz],
+      [tx,     tz + 1],
+      [tx + 1, tz + 1]
     ];
 
     for (const [vx, vz] of vertices) {
@@ -128,7 +118,6 @@ export class HeightTool {
     this.applyHeightsToMesh();
   }
 
-  /** Writes the entire `heights` array to the terrain mesh's vertex positions. */
   applyHeightsToMesh() {
     if (!this.terrainMesh) return;
     const pos = this.terrainMesh.geometry.attributes.position;
@@ -141,11 +130,11 @@ export class HeightTool {
     }
     pos.needsUpdate = true;
     this.terrainMesh.geometry.computeVertexNormals();
+    this.terrainMesh.geometry.computeBoundingSphere(); // CORRECTED: Ensures bounds are updated
 
     this.updatePinPositions();
   }
   
-  /** Updates the Y-position of all pin visualizers to match the terrain. */
   updatePinPositions() {
     for (const [key, mesh] of this.pinMeshes) {
       const [tx, tz] = key.split(',').map(Number);
