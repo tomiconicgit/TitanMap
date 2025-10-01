@@ -12,17 +12,20 @@ export class UIPanel {
     this.fileInput.style.display = 'none';
     document.body.appendChild(this.fileInput);
 
-    this._terrainSelected = null;
+    // Terrain selection state (UI only)
+    this._terrainSelected = null; // 'sand' | 'dirt' | ... or null
 
     this._createStyles();
     this._createPanel();
     this._addEventListeners();
   }
 
+  /** Public: reflect Marker UI from main if needed */
   setMarkerToggle(on) {
     if (this.markerToggleEl) this.markerToggleEl.checked = !!on;
   }
 
+  /** Public: clear Terrain selection (used when painting gets cancelled externally) */
   clearTerrainSelection() {
     this._terrainSelected = null;
     if (this.terrainListEl) {
@@ -148,6 +151,7 @@ export class UIPanel {
     const wrap = document.createElement('div');
     wrap.className = 'panel-col';
 
+    // Row 1: Toggles
     const row1 = document.createElement('div');
     row1.className = 'panel-row';
 
@@ -175,6 +179,7 @@ export class UIPanel {
 
     row1.append(t1label, toggle1, t2label, toggle2);
 
+    // Row 2: Height selector with Up/Down
     const row2 = document.createElement('div');
     row2.className = 'panel-row';
 
@@ -184,9 +189,9 @@ export class UIPanel {
     this.heightValue = document.createElement('input');
     this.heightValue.type = 'number';
     this.heightValue.value = 0;
-    this.heightValue.min = -50;
-    this.heightValue.max = 50;
-    this.heightValue.step = 1;
+    this.heightValue.min = -10;
+    this.heightValue.max = 10;
+    this.heightValue.step = 0.2;
 
     const downBtn = document.createElement('button');
     downBtn.textContent = 'Down';
@@ -198,7 +203,7 @@ export class UIPanel {
 
     const hint = document.createElement('div');
     hint.className = 'hint';
-    hint.textContent = 'Pin ON: tap to green-highlight tiles (they hold shape). Pin OFF: tap to set tile height.';
+    hint.textContent = 'Pin ON: tap to green-highlight tiles (they hold shape). Pin OFF: tap to set tile height (±0.2 steps).';
 
     row2.append(hvLabel, this.heightValue, downBtn, upBtn);
 
@@ -293,6 +298,7 @@ export class UIPanel {
 
     // Delegated clicks in panel content
     this.contentElement.addEventListener('click', (e) => {
+      // Generate
       const genBtn = e.target.closest('.generate-btn');
       if (genBtn) {
         const width = Math.max(2, Math.min(200, parseInt(this.widthInput.value, 10) || 30));
@@ -302,6 +308,7 @@ export class UIPanel {
         return;
       }
 
+      // Save
       const saveBtn = e.target.closest('.save-btn');
       if (saveBtn) {
         let filename = window.prompt('Name your save file:', 'titanmap.json');
@@ -312,6 +319,7 @@ export class UIPanel {
         return;
       }
 
+      // Load
       const loadBtn = e.target.closest('.load-btn');
       if (loadBtn) {
         this.fileInput.value = '';
@@ -319,6 +327,7 @@ export class UIPanel {
         return;
       }
 
+      // Terrain item click (toggle select)
       const item = e.target.closest('.terrain-item');
       if (item && this.terrainListEl?.contains(item)) {
         const type = item.dataset.type;
@@ -338,11 +347,13 @@ export class UIPanel {
         return;
       }
 
+      // Height up/down (±0.2, clamp [-10,10])
       const up = e.target.closest('.height-up');
       const dn = e.target.closest('.height-down');
       if (up || dn) {
-        const v = parseInt(this.heightValue?.value || '0', 10);
-        const next = Math.max(-50, Math.min(50, v + (up ? 1 : -1)));
+        const cur = parseFloat(this.heightValue?.value || '0') || 0;
+        let next = cur + (up ? 0.2 : -0.2);
+        next = Math.max(-10, Math.min(10, Math.round(next / 0.2) * 0.2));
         if (this.heightValue) this.heightValue.value = next;
         const evt = new CustomEvent('height-set', { detail: { value: next } });
         this.panelElement.dispatchEvent(evt);
@@ -350,8 +361,9 @@ export class UIPanel {
       }
     });
 
-    // Changes (toggles & numeric)
+    // All 'change' toggles + numeric input
     this.panelElement.addEventListener('change', (e) => {
+      // Grid outlines
       const outline = e.target.closest('.outline-toggle');
       if (outline) {
         const wantOn = !!outline.checked;
@@ -360,6 +372,7 @@ export class UIPanel {
         return;
       }
 
+      // Marker toggle
       const chk = e.target.closest('.marker-toggle');
       if (chk) {
         const wantOn = !!chk.checked;
@@ -368,6 +381,7 @@ export class UIPanel {
         return;
       }
 
+      // Height mode toggle
       if (e.target === this.heightModeEl) {
         const wantOn = !!this.heightModeEl.checked;
         const evt = new CustomEvent('height-toggle-request', { detail: { wantOn } });
@@ -375,6 +389,7 @@ export class UIPanel {
         return;
       }
 
+      // Pin mode toggle
       if (e.target === this.pinModeEl) {
         const wantOn = !!this.pinModeEl.checked;
         const evt = new CustomEvent('pin-toggle-request', { detail: { wantOn } });
@@ -382,8 +397,10 @@ export class UIPanel {
         return;
       }
 
+      // Height numeric input changed
       if (e.target === this.heightValue) {
-        const v = Math.max(-50, Math.min(50, parseInt(this.heightValue.value || '0', 10)));
+        let v = parseFloat(this.heightValue.value || '0') || 0;
+        v = Math.max(-10, Math.min(10, Math.round(v / 0.2) * 0.2));
         this.heightValue.value = v;
         const evt = new CustomEvent('height-set', { detail: { value: v } });
         this.panelElement.dispatchEvent(evt);
@@ -438,7 +455,7 @@ export class UIPanel {
       .panel-col { display: flex; flex-direction: column; gap: 10px; }
       .panel-row label { font-weight: 500; color: #ccc; }
       .panel-row input[type="number"] {
-        width: 64px; background: #111; border: 1px solid #444; color: #fff;
+        width: 80px; background: #111; border: 1px solid #444; color: #fff;
         padding: 8px; border-radius: 2px; text-align: center;
       }
       .panel-row span { color: #777; font-weight: bold; }
@@ -449,7 +466,6 @@ export class UIPanel {
       }
       .load-btn { background: #6a5acd; }
       .hint { opacity: 0.7; font-size: 12px; margin-top: 4px; }
-
       .switch { position: relative; display: inline-block; width: 44px; height: 24px; margin-left: 6px; }
       .switch input { opacity: 0; width: 0; height: 0; }
       .slider {
