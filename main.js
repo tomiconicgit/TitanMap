@@ -5,6 +5,7 @@ import { createCamera } from './camera.js';
 import { createCharacter } from './character.js';
 import { UIPanel } from './ui-panel.js';
 import { Sky } from 'three/addons/objects/Sky.js';
+import { MarkerTool } from './marker.js';
 
 // ---- tile helpers for a single centered plane ----
 function tileToWorld(tx, tz, gridWidth, gridHeight) {
@@ -19,6 +20,7 @@ function worldToTile(x, z, gridWidth, gridHeight) {
   tz = Math.max(0, Math.min(gridHeight - 1, tz));
   return { tx, tz };
 }
+const keyFor = (tx, tz) => `${tx},${tz}`;
 
 function init() {
   // --- Scene / renderer ---
@@ -53,8 +55,12 @@ function init() {
   let edgesMesh = null;
   let showOutlines = false;
 
-  // --- Tap-to-move state ---
+  // --- Tap-to-move / marker state ---
   let freezeTapToMove = false;
+  let markerMode = false;
+  const blockedTiles = new Set(); // "tx,tz" that are non-walkable
+
+  // For camera picking
   const raycaster = new THREE.Raycaster();
   const ndc = new THREE.Vector2();
   const downPos = new THREE.Vector2();
@@ -70,7 +76,7 @@ function init() {
     rayleigh: 0.508,
     mieCoefficient: 0.002,
     mieDirectionalG: 0.654,
-    elevation: 70,     // <- as requested
+    elevation: 70,     // current requirement
     azimuth: 180,
     exposure: 0.3209
   };
@@ -149,10 +155,14 @@ function init() {
     scene.add(edgesMesh);
   }
 
+  // --- Marker tool (visual red overlays while marking) ---
+  const markerTool = new MarkerTool(scene, tileToWorld, gridWidth, gridHeight);
+
   function regenerateWorld(width, height) {
     gridWidth = width | 0;
     gridHeight = height | 0;
 
+    // reset world
     if (terrainMesh) {
       scene.remove(terrainMesh);
       terrainMesh.geometry?.dispose?.();
@@ -169,26 +179,29 @@ function init() {
     terrainMesh.receiveShadow = true;
     scene.add(terrainMesh);
 
-    // Center the ball on the middle *tile*
+    // center the ball on middle tile
     const tx = Math.floor(gridWidth / 2);
     const tz = Math.floor(gridHeight / 2);
     const { x, z } = tileToWorld(tx, tz, gridWidth, gridHeight);
     character.position.set(x, 0.35, z);
     character.castShadow = true;
 
-    // Focus camera near that tile
     controls.target.set(x, 0, z);
     camera.position.set(x + 3, 6, z + 9);
     controls.update();
 
+    // refresh overlays & tools
     rebuildEdges();
+    markerTool.setGridSize(gridWidth, gridHeight);
+    blockedTiles.clear(); // new world => clear previous blocks
 
-    // Update sky/env/light to match scene span (min 100)
+    // fit sky to new span
     const span = Math.max(gridWidth, gridHeight);
     updateSkyAndLight(span, new THREE.Vector3(x, 0, z));
   }
 
-  // --- Freeze Toggle (top-left) ---
+  // --- Freeze Toggle (top-left HUD) ---
+  let freezeCheckboxEl = null;
   (function addFreezeToggle() {
     const style = document.createElement('style');
     style.textContent = `
@@ -214,6 +227,7 @@ function init() {
       }
       input:checked + .slider { background: #00aaff; }
       input:checked + .slider:before { transform: translateX(20px); }
+      input:disabled + .slider { filter: grayscale(0.3); opacity: 0.6; cursor: not-allowed; }
     `;
     document.head.appendChild(style);
 
@@ -228,9 +242,14 @@ function init() {
     `;
     document.body.appendChild(hud);
 
-    const checkbox = hud.querySelector('#freezeMoveToggle');
-    checkbox.addEventListener('change', () => {
-      freezeTapToMove = !!checkbox.checked;
+    freezeCheckboxEl = hud.querySelector('#freezeMoveToggle');
+    freezeCheckboxEl.addEventListener('change', () => {
+      // only respond if not in marker mode (marker mode controls this)
+      if (markerMode) {
+        freezeCheckboxEl.checked = true;
+        return;
+      }
+      freezeTapToMove = !!freezeCheckboxEl.checked;
     });
   })();
 
@@ -240,20 +259,55 @@ function init() {
   // --- UI Panel ---
   const uiPanel = new UIPanel(document.body);
 
+  // Grid size -> regenerate
   uiPanel.panelElement.addEventListener('generate', (e) => {
     const { width, height } = e.detail;
     regenerateWorld(width, height);
   });
 
+  // Tile outline toggle (already in your Grid UI)
   uiPanel.panelElement.addEventListener('grid-outline-toggle', (e) => {
     showOutlines = !!(e.detail && e.detail.wantOn);
     rebuildEdges();
   });
 
+  // Marker toggle wiring (NEW logic)
+  uiPanel.panelElement.addEventListener('marker-toggle-request', (e) => {
+    const wantOn = !!(e.detail && e.detail.wantOn);
+
+    if (wantOn) {
+      // Enter marker mode: freeze tap-to-move and lock the switch
+      markerMode = true;
+      markerTool.setVisible(true);
+      markerTool.clearAll(); // start fresh for this session
+      freezeTapToMove = true;
+      if (freezeCheckboxEl) {
+        freezeCheckboxEl.checked = true;
+        freezeCheckboxEl.disabled = true;
+      }
+    } else {
+      // Leave marker mode:
+      // 1) capture marked tiles -> add to blocked set
+      const keys = markerTool.getMarkedKeys();
+      for (const k of keys) blockedTiles.add(k);
+      // 2) remove overlays
+      markerTool.clearAll();
+      markerTool.setVisible(false);
+      // 3) unfreeze and unlock the switch
+      markerMode = false;
+      freezeTapToMove = false;
+      if (freezeCheckboxEl) {
+        freezeCheckboxEl.checked = false;
+        freezeCheckboxEl.disabled = false;
+      }
+    }
+  });
+
+  // Save
   uiPanel.panelElement.addEventListener('save-project', (e) => {
     const { filename } = e.detail;
     const data = {
-      version: 3,
+      version: 4,
       timestamp: Date.now(),
       grid: { width: gridWidth, height: gridHeight },
       character: { position: character.position.toArray() },
@@ -262,7 +316,8 @@ function init() {
         target: controls.target.toArray()
       },
       view: { outlines: !!showOutlines },
-      sky: { ...SKY_PARAMS }
+      sky: { ...SKY_PARAMS },
+      blocked: [...blockedTiles] // persist non-walkable tiles
     };
     const json = JSON.stringify(data, null, 2);
     const blob = new Blob([json], { type: 'application/json' });
@@ -276,6 +331,7 @@ function init() {
     URL.revokeObjectURL(url);
   });
 
+  // Load
   uiPanel.panelElement.addEventListener('load-project-data', (e) => {
     const { data } = e.detail || {};
     if (!data || !data.grid) { alert('Invalid save file.'); return; }
@@ -297,9 +353,13 @@ function init() {
       const span = Math.max(gridWidth, gridHeight);
       updateSkyAndLight(span, controls.target.clone());
     }
+    blockedTiles.clear();
+    if (Array.isArray(data.blocked)) {
+      for (const k of data.blocked) blockedTiles.add(String(k));
+    }
   });
 
-  // --- Tap-to-move input on the canvas (camera follows) ---
+  // --- Input: tap on canvas ---
   const canvas = viewport.renderer.domElement;
 
   canvas.addEventListener('pointerdown', (e) => {
@@ -309,7 +369,6 @@ function init() {
   canvas.addEventListener('pointerup', (e) => {
     const up = new THREE.Vector2(e.clientX, e.clientY);
     if (downPos.distanceTo(up) > 5) return;      // ignore drags
-    if (freezeTapToMove) return;
     if (!terrainMesh) return;
 
     const rect = canvas.getBoundingClientRect();
@@ -322,9 +381,21 @@ function init() {
 
     const p = hit[0].point;
     const { tx, tz } = worldToTile(p.x, p.z, gridWidth, gridHeight);
-    const c = tileToWorld(tx, tz, gridWidth, gridHeight);
 
-    // --- FOLLOW CAM: shift camera and controls.target by same delta as the ball ---
+    // If we’re in marker mode: add a red overlay and exit (no movement)
+    if (markerMode) {
+      markerTool.mark(tx, tz);
+      return;
+    }
+
+    // If freeze is active: no movement
+    if (freezeTapToMove) return;
+
+    // If target tile is blocked: no movement
+    if (blockedTiles.has(keyFor(tx, tz))) return;
+
+    // Move ball to the tile center and shift camera/target by the same delta (follow-cam)
+    const c = tileToWorld(tx, tz, gridWidth, gridHeight);
     const old = character.position.clone();
     const newPos = new THREE.Vector3(c.x, 0.35, c.z);
     const delta = newPos.clone().sub(old);
