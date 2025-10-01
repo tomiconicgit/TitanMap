@@ -6,6 +6,7 @@ import { createGrid } from './grid.js';
 import { createCharacter } from './character.js';
 import { worldToTile } from './grid-utils.js';
 import { CharacterController } from './character-controller.js';
+import { UIPanel } from './ui-panel.js'; // 1. Import the new UI Panel
 
 window.onload = function () {
   // 1) Scene & lights
@@ -43,11 +44,14 @@ window.onload = function () {
   viewport.scene = scene;
   viewport.camera = camera;
 
+  // 5) Create the UI Panel
+  const uiPanel = new UIPanel(document.body);
+
   // --- FOLLOW: keep camera & target translating with the character ---
   const lastCharPos = character.position.clone();
   const moveDelta = new THREE.Vector3();
 
-  // 5) Tap-to-move (tap, not drag)
+  // 6) Tap-to-move (tap, not drag)
   const raycaster = new THREE.Raycaster();
   const ndc = new THREE.Vector2();
   const downPos = new THREE.Vector2();
@@ -75,22 +79,18 @@ window.onload = function () {
     controller.moveTo(tx, tz);
   });
 
-  // 6) Loop — controller update, then translate camera by character delta
+  // 7) Loop — controller update, then translate camera by character delta
   viewport.onBeforeRender = (dt) => {
     controller.update(dt);
 
-    // How far did the character move this frame?
     moveDelta.subVectors(character.position, lastCharPos);
 
     if (moveDelta.lengthSq() > 0) {
-      // Shift both camera and orbit target by the same amount.
       camera.position.add(moveDelta);
       controls.target.add(moveDelta);
-
       lastCharPos.copy(character.position);
     }
-
-    // Keep OrbitControls responsive (damping, user orbit/zoom/tilt)
+    
     controls.update();
   };
 };
