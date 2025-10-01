@@ -1,42 +1,30 @@
 // file: height-tool.js
 import * as THREE from 'three';
 
-/**
- * HeightTool for a single PlaneGeometry terrain:
- * - Stores a (w+1)*(h+1) heightfield (applied to geometry local Z, i.e. world Y).
- * - setTileHeight(tx,tz,val): sets the four corner vertices of that tile unless pinned.
- * - Pinned tiles lock their four corner vertices. Green overlays show pins while visible.
- */
 export class HeightTool {
-  /**
-   * @param {THREE.Scene} scene
-   * @param {THREE.Mesh} terrainMesh
-   * @param {number} gridWidth
-   * @param {number} gridHeight
-   */
   constructor(scene, terrainMesh, gridWidth = 10, gridHeight = 10) {
     this.scene = scene;
     this.terrainMesh = terrainMesh;
     this.gridWidth = gridWidth | 0;
     this.gridHeight = gridHeight | 0;
 
-    // (w+1)*(h+1) per-vertex heights (local Z => world Y after mesh rotation)
     this.heights = new Float32Array((this.gridWidth + 1) * (this.gridHeight + 1)).fill(0);
-
-    // pinned tiles => lock their 4 corner vertices
     this.pinned = new Set();
 
-    // green overlay visuals for pinned tiles
     this.pinGroup = new THREE.Group();
     this.pinGroup.name = 'HeightPinsOverlay';
     this.pinGroup.visible = false;
     this.scene.add(this.pinGroup);
-    this.pinMeshes = new Map(); // key -> mesh
+    this.pinMeshes = new Map();
+
+    // callback to notify others (terrain outlines) that geometry changed
+    this._onApplied = null;
 
     this._applyHeightsToGeometry();
   }
 
-  // ---- helpers ----
+  setOnApplied(cb) { this._onApplied = cb || null; }
+
   _idx(vx, vz) { return vz * (this.gridWidth + 1) + vx; }
   _key(tx, tz) { return `${tx},${tz}`; }
 
@@ -162,8 +150,7 @@ export class HeightTool {
     }
 
     for (let i = 0; i < this.heights.length; i++) {
-      // IMPORTANT: PlaneGeometry is XY plane; after mesh rotation,
-      // local Z corresponds to world Y (vertical).
+      // PlaneGeometry is XY plane; after mesh rotation, local Z => world Y
       pos.setZ(i, this.heights[i]);
     }
     pos.needsUpdate = true;
@@ -175,5 +162,8 @@ export class HeightTool {
       const [tx, tz] = k.split(',').map(Number);
       mesh.position.y = this._tileAverageHeight(tx, tz) + 0.05;
     }
+
+    // notify listeners (terrain outlines, etc.)
+    if (this._onApplied) this._onApplied();
   }
 }
