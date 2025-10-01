@@ -5,7 +5,7 @@ import { createCamera } from './camera.js';
 import { createCharacter } from './character.js';
 import { UIPanel } from './ui-panel.js';
 
-window.onload = function () {
+function init() {
   // --- Scene / renderer ---
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x111318);
@@ -21,7 +21,7 @@ window.onload = function () {
   dirLight.position.set(5, 10, 7.5);
   scene.add(dirLight);
 
-  // --- Character FIRST (so regenerateWorld can safely reference it) ---
+  // --- Character FIRST ---
   const character = createCharacter();
   scene.add(character);
   character.position.set(0, 0.35, 0);
@@ -35,7 +35,6 @@ window.onload = function () {
   let showOutlines = false;
 
   function rebuildEdges() {
-    // remove old overlay
     if (edgesMesh) {
       scene.remove(edgesMesh);
       edgesMesh.geometry?.dispose?.();
@@ -44,15 +43,13 @@ window.onload = function () {
     }
     if (!terrainMesh || !showOutlines) return;
 
-    // build fresh overlay from current geometry
     const eg = new THREE.EdgesGeometry(terrainMesh.geometry);
     const emat = new THREE.LineBasicMaterial({ color: 0x00aaff });
     edgesMesh = new THREE.LineSegments(eg, emat);
 
-    // match transform and nudge up to avoid z-fighting
     edgesMesh.position.copy(terrainMesh.position);
     edgesMesh.rotation.copy(terrainMesh.rotation);
-    edgesMesh.position.y += 0.001;
+    edgesMesh.position.y += 0.001; // avoid z-fighting
     edgesMesh.renderOrder = 1;
 
     scene.add(edgesMesh);
@@ -69,7 +66,7 @@ window.onload = function () {
       terrainMesh = null;
     }
 
-    // Size = tiles, Segments = tiles (each tile is a quad between vertices)
+    // Size = tiles, Segments = tiles
     const geo = new THREE.PlaneGeometry(gridWidth, gridHeight, gridWidth, gridHeight);
     const mat = new THREE.MeshStandardMaterial({
       color: 0x777777,
@@ -89,7 +86,6 @@ window.onload = function () {
     camera.position.set(3, 6, 9);
     controls.update();
 
-    // refresh outlines
     rebuildEdges();
   }
 
@@ -99,19 +95,16 @@ window.onload = function () {
   // --- UI Panel ---
   const uiPanel = new UIPanel(document.body);
 
-  // Grid size -> regenerate
   uiPanel.panelElement.addEventListener('generate', (e) => {
     const { width, height } = e.detail;
     regenerateWorld(width, height);
   });
 
-  // Toggle tile outlines
   uiPanel.panelElement.addEventListener('grid-outline-toggle', (e) => {
     showOutlines = !!(e.detail && e.detail.wantOn);
     rebuildEdges();
   });
 
-  // Save
   uiPanel.panelElement.addEventListener('save-project', (e) => {
     const { filename } = e.detail;
     const data = {
@@ -137,7 +130,6 @@ window.onload = function () {
     URL.revokeObjectURL(url);
   });
 
-  // Load
   uiPanel.panelElement.addEventListener('load-project-data', (e) => {
     const { data } = e.detail || {};
     if (!data || !data.grid) {
@@ -156,7 +148,6 @@ window.onload = function () {
     }
     if (data.view && typeof data.view.outlines === 'boolean') {
       showOutlines = data.view.outlines;
-      // reflect toggle in UI if currently on Grid tab
       if (uiPanel.outlineToggleEl) uiPanel.outlineToggleEl.checked = showOutlines;
       rebuildEdges();
     }
@@ -166,4 +157,11 @@ window.onload = function () {
   viewport.onBeforeRender = () => {
     controls.update();
   };
-};
+}
+
+// Run immediately (don’t rely on window.onload with modules)
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', init, { once: true });
+} else {
+  init();
+}
