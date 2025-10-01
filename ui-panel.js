@@ -1,6 +1,4 @@
 // file: ui-panel.js
-import { generateTerrainThumbnail } from './procedural-textures.js';
-
 export class UIPanel {
   constructor(container) {
     this.container = container;
@@ -14,17 +12,27 @@ export class UIPanel {
     this.fileInput.style.display = 'none';
     document.body.appendChild(this.fileInput);
 
-    // selection state for Terrain gallery
-    this.terrainSelected = 'sand';
+    // Terrain selection state (UI only)
+    this._terrainSelected = null; // 'sand' | 'dirt' | ... or null
 
     this._createStyles();
     this._createPanel();
     this._addEventListeners();
   }
 
-  /** Public: let main.js reflect the Marker toggle state in the UI */
+  /** Public: reflect Marker UI from main if needed */
   setMarkerToggle(on) {
     if (this.markerToggleEl) this.markerToggleEl.checked = !!on;
+  }
+
+  /** Public: clear Terrain selection (used when painting gets cancelled externally) */
+  clearTerrainSelection() {
+    this._terrainSelected = null;
+    if (this.terrainListEl) {
+      this.terrainListEl
+        .querySelectorAll('.terrain-item.selected')
+        .forEach(el => el.classList.remove('selected'));
+    }
   }
 
   _createGridTabContent() {
@@ -44,7 +52,7 @@ export class UIPanel {
     this.widthInput.max = 200;
 
     const sep = document.createElement('span');
-    sep.textContent = '×';
+    sep.textContent = 'x';
 
     this.heightInput = document.createElement('input');
     this.heightInput.type = 'number';
@@ -58,7 +66,7 @@ export class UIPanel {
 
     row1.append(label, this.widthInput, sep, this.heightInput, this.generateButton);
 
-    // Row 2: Marker toggle
+    // Row 2: Marker Mode toggle
     const row2 = document.createElement('div');
     row2.className = 'panel-row';
     row2.style.marginTop = '8px';
@@ -87,55 +95,43 @@ export class UIPanel {
   }
 
   _createTerrainTabContent() {
-    // Horizontal scroll gallery with six types
     const wrap = document.createElement('div');
-    wrap.className = 'terrain-wrap';
+    wrap.className = 'panel-col';
 
-    const title = document.createElement('div');
-    title.className = 'terrain-title';
-    title.textContent = 'Procedural Terrain Materials';
-    wrap.appendChild(title);
+    // helper to make an item
+    const makeItem = (key, label, styleBg) => {
+      const btn = document.createElement('button');
+      btn.className = 'terrain-item';
+      btn.dataset.type = key;
+      btn.innerHTML = `<span class="thumb"></span><span class="label">${label}</span>`;
+      btn.querySelector('.thumb').style.background = styleBg;
+      return btn;
+    };
 
-    const gallery = document.createElement('div');
-    gallery.className = 'h-scroll';
+    this.terrainListEl = document.createElement('div');
+    this.terrainListEl.className = 'terrain-scroller';
 
-    const types = [
-      { id: 'sand',   label: 'Sand'   },
-      { id: 'dirt',   label: 'Dirt'   },
-      { id: 'grass',  label: 'Grass'  },
-      { id: 'stone',  label: 'Stone'  },
-      { id: 'gravel', label: 'Gravel' },
-      { id: 'water',  label: 'Water'  },
+    // Simple procedural-looking thumbnails via CSS backgrounds
+    const items = [
+      ['sand',   'Sand',   'linear-gradient(135deg,#d8c6a3,#cdb88f)'],
+      ['dirt',   'Dirt',   'linear-gradient(135deg,#8b5a2b,#6f451f)'],
+      ['grass',  'Grass',  'linear-gradient(135deg,#3aa83a,#2e7d32)'],
+      ['stone',  'Stone',  'linear-gradient(135deg,#909090,#7a7a7a)'],
+      ['gravel', 'Gravel', 'repeating-linear-gradient(135deg,#9a9a9a,#9a9a9a 6px,#8a8a8a 6px,#8a8a8a 12px)'],
+      ['water',  'Water',  'linear-gradient(135deg,#3a7bd5,#2062b0)']
     ];
 
-    this.terrainTiles = [];
+    items.forEach(([k, lbl, bg]) => this.terrainListEl.appendChild(makeItem(k, lbl, bg)));
 
-    types.forEach(t => {
-      const card = document.createElement('button');
-      card.className = 'tile';
-      card.type = 'button';
-      card.dataset.terrainId = t.id;
-
-      const canvas = generateTerrainThumbnail(t.id, 96);
-      canvas.className = 'thumb';
-
-      const label = document.createElement('label');
-      label.textContent = t.label;
-
-      card.append(canvas, label);
-      if (t.id === this.terrainSelected) card.classList.add('selected');
-
-      gallery.appendChild(card);
-      this.terrainTiles.push(card);
-    });
-
-    wrap.appendChild(gallery);
+    // Note: when opening Terrain tab we clear selection (per spec)
+    this.clearTerrainSelection();
 
     const hint = document.createElement('div');
     hint.className = 'hint';
-    hint.textContent = 'Select a material to use for painting tiles (paint tools coming next).';
-    wrap.appendChild(hint);
+    hint.textContent = 'Tap a texture to start painting tiles (tap it again to stop).';
 
+    wrap.appendChild(this.terrainListEl);
+    wrap.appendChild(hint);
     return wrap;
   }
 
@@ -205,10 +201,15 @@ export class UIPanel {
 
       this.contentElement.innerHTML = '';
       const tabName = clicked.dataset.tabName;
+
       if (tabName === 'Grid') {
         this.contentElement.appendChild(this._createGridTabContent());
       } else if (tabName === 'Terrain') {
+        // Clear selection when opening Terrain tab
         this.contentElement.appendChild(this._createTerrainTabContent());
+        this.clearTerrainSelection();
+        const evt = new CustomEvent('terrain-tab-opened', {});
+        this.panelElement.dispatchEvent(evt);
       } else if (tabName === 'Settings') {
         this.contentElement.appendChild(this._createSettingsTabContent());
       } else {
@@ -216,9 +217,9 @@ export class UIPanel {
       }
     });
 
-    // Delegated clicks inside current tab
+    // Delegated clicks in panel content
     this.contentElement.addEventListener('click', (e) => {
-      // Generate (Grid)
+      // Generate
       const genBtn = e.target.closest('.generate-btn');
       if (genBtn) {
         const width = Math.max(2, Math.min(200, parseInt(this.widthInput.value, 10) || 30));
@@ -228,7 +229,7 @@ export class UIPanel {
         return;
       }
 
-      // Save (Settings)
+      // Save
       const saveBtn = e.target.closest('.save-btn');
       if (saveBtn) {
         let filename = window.prompt('Name your save file:', 'titanmap.json');
@@ -239,7 +240,7 @@ export class UIPanel {
         return;
       }
 
-      // Load (Settings)
+      // Load
       const loadBtn = e.target.closest('.load-btn');
       if (loadBtn) {
         this.fileInput.value = '';
@@ -247,18 +248,29 @@ export class UIPanel {
         return;
       }
 
-      // Terrain selection
-      const tile = e.target.closest('.tile');
-      if (tile && tile.dataset.terrainId) {
-        this.terrainSelected = tile.dataset.terrainId;
-        this.terrainTiles?.forEach(t => t.classList.toggle('selected', t === tile));
-        const evt = new CustomEvent('terrain-select', { detail: { type: this.terrainSelected } });
-        this.panelElement.dispatchEvent(evt);
-        return;
+      // Terrain item click (toggle select)
+      const item = e.target.closest('.terrain-item');
+      if (item && this.terrainListEl?.contains(item)) {
+        const type = item.dataset.type;
+        if (this._terrainSelected === type) {
+          // toggle off
+          item.classList.remove('selected');
+          this._terrainSelected = null;
+          const evt = new CustomEvent('terrain-select', { detail: { type, active: false } });
+          this.panelElement.dispatchEvent(evt);
+        } else {
+          // switch to new selection
+          this.terrainListEl.querySelectorAll('.terrain-item.selected')
+            .forEach(el => el.classList.remove('selected'));
+          item.classList.add('selected');
+          this._terrainSelected = type;
+          const evt = new CustomEvent('terrain-select', { detail: { type, active: true } });
+          this.panelElement.dispatchEvent(evt);
+        }
       }
     });
 
-    // Marker toggle → request change
+    // Marker toggle
     this.panelElement.addEventListener('change', (e) => {
       const chk = e.target.closest('.marker-toggle');
       if (!chk) return;
@@ -311,7 +323,7 @@ export class UIPanel {
       .tab.active { color: #fff; border-bottom-color: #00aaff; }
       .panel-content { padding: 20px; font-size: 14px; min-height: 40px; }
       .panel-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
-      .panel-col { display: flex; flex-direction: column; }
+      .panel-col { display: flex; flex-direction: column; gap: 10px; }
       .panel-row label { font-weight: 500; color: #ccc; }
       .panel-row input[type="number"] {
         width: 64px; background: #111; border: 1px solid #444; color: #fff;
@@ -319,17 +331,14 @@ export class UIPanel {
       }
       .panel-row span { color: #777; font-weight: bold; }
       .muted { color: #8a8d92; font-weight: 400; font-size: 12px; }
-
-      .generate-btn,
-      .save-btn,
-      .load-btn {
+      .generate-btn, .save-btn, .load-btn {
         background: #00aaff; color: #fff; border: none; padding: 8px 16px;
         border-radius: 2px; font-weight: 600; cursor: pointer;
       }
       .load-btn { background: #6a5acd; }
-      .hint { opacity: 0.7; font-size: 12px; margin-top: 8px; }
+      .hint { opacity: 0.7; font-size: 12px; margin-top: 4px; }
 
-      /* Pretty switch */
+      /* pretty switch */
       .switch { position: relative; display: inline-block; width: 44px; height: 24px; margin-left: 6px; }
       .switch input { opacity: 0; width: 0; height: 0; }
       .slider {
@@ -345,22 +354,22 @@ export class UIPanel {
       input:checked + .slider { background: #00aaff; }
       input:checked + .slider:before { transform: translateX(20px); }
 
-      /* Terrain gallery */
-      .terrain-wrap {}
-      .terrain-title { font-weight: 600; color: #dfe3e7; margin-bottom: 10px; }
-      .h-scroll {
-        display: flex; gap: 12px; overflow-x: auto; padding: 4px 2px;
-        -webkit-overflow-scrolling: touch; scrollbar-width: thin;
+      /* Terrain scroller */
+      .terrain-scroller {
+        display: flex; gap: 10px; overflow-x: auto; padding-bottom: 6px;
+        -webkit-overflow-scrolling: touch;
       }
-      .tile {
-        flex: 0 0 auto; width: 96px; aspect-ratio: 1 / 1; padding: 0; border: 2px solid transparent;
-        border-radius: 10px; background: #15181c; cursor: pointer; display: flex; flex-direction: column;
-        align-items: stretch; justify-content: flex-start; outline: none;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.25);
+      .terrain-item {
+        min-width: 84px; max-width: 84px; border: 1px solid rgba(255,255,255,0.12);
+        background: rgba(255,255,255,0.04); border-radius: 8px; padding: 8px;
+        display: flex; flex-direction: column; align-items: center; gap: 6px;
+        cursor: pointer;
       }
-      .tile.selected { border-color: #00aaff; box-shadow: 0 0 0 2px rgba(0,170,255,0.15) inset, 0 2px 10px rgba(0,0,0,0.35); }
-      .tile .thumb { width: 100%; height: auto; display: block; border-top-left-radius: 8px; border-top-right-radius: 8px; }
-      .tile label { text-align: center; font-size: 12px; padding: 6px 0 8px; color: #cfd3d7; }
+      .terrain-item .thumb {
+        width: 64px; height: 64px; border-radius: 6px; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.25);
+      }
+      .terrain-item .label { font-size: 12px; color: #dcdde2; }
+      .terrain-item.selected { outline: 2px solid #00aaff; outline-offset: 2px; }
     `;
     document.head.appendChild(style);
   }
