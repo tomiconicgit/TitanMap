@@ -1,7 +1,7 @@
 // file: main.js
 import * as THREE from 'three';
 import Viewport from './viewport.js';
-// REMOVED: import { createGrid } from './grid.js';
+import { createCamera } from './camera.js';               // keep static import
 import { createCharacter } from './character.js';
 import { worldToTile, tileToWorld } from './grid-utils.js';
 import { CharacterController } from './character-controller.js';
@@ -10,9 +10,11 @@ import { Water } from 'three/addons/objects/Water.js';
 import { HeightTool } from './height-tool.js';
 
 window.onload = function () {
+  // --- WORLD STATE ---
   let gridWidth, gridHeight;
-  let terrainMesh;                 // <- single solid world surface (no line grid)
+  let terrainMesh; // single solid world surface (size = tiles, segments = tiles)
 
+  // --- INPUT / MODES ---
   let freezeTapToMove = false;
   let freezeCheckboxEl = null;
 
@@ -47,24 +49,7 @@ window.onload = function () {
   scene.add(character);
 
   const viewport = new Viewport();
-  const { camera } = (() => {
-    const { camera, controls } = (function createCamera(canvas){
-      const cam = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
-      cam.position.set(2, 6, 8);
-      const { OrbitControls } = THREE.Addons ?? {}; // safety if tree-shaken; but we import via importmap
-      // Use original helper
-      return { camera: cam, controls: new (require('three/addons/controls/OrbitControls.js').OrbitControls)(cam, viewport.renderer.domElement) };
-    })();
-    return { camera };
-  })(); // (we still set controls below via createCamera import in your original; keeping your existing createCamera is fine)
-
-  // If you prefer your existing createCamera helper, keep it:
-  // import { createCamera } from './camera.js';
-  // const { camera, controls } = createCamera(viewport.renderer.domElement);
-
-  // Reuse your existing createCamera:
-  const { createCamera: _createCamera } = await import('./camera.js');
-  const { controls } = _createCamera(viewport.renderer.domElement);
+  const { camera, controls } = createCamera(viewport.renderer.domElement);
   viewport.scene = scene;
   viewport.camera = camera;
   controls.target.set(0, 0, 0);
@@ -77,8 +62,8 @@ window.onload = function () {
 
   // -------- WORLD GENERATION (UNIFIED MESH) --------
   function regenerateWorld(width, height) {
-    gridWidth = width|0;
-    gridHeight = height|0;
+    gridWidth = width | 0;
+    gridHeight = height | 0;
 
     if (terrainMesh) {
       scene.remove(terrainMesh);
@@ -89,6 +74,7 @@ window.onload = function () {
 
     // Single mesh: size = tiles, segments = tiles
     const terrainGeo = new THREE.PlaneGeometry(gridWidth, gridHeight, gridWidth, gridHeight);
+
     // Vertex colors so we can paint tiles by coloring the 4 corner vertices per tile
     const colors = [];
     const defaultColor = new THREE.Color(0x888888);
@@ -108,7 +94,6 @@ window.onload = function () {
     terrainMesh.name = 'TerrainMesh';
     scene.add(terrainMesh);
 
-    // Clear overlays/paint
     clearAllPainted();
 
     // Height tool binds to the unified mesh (vertex grid = (W+1)*(H+1))
@@ -132,12 +117,12 @@ window.onload = function () {
     controls.update();
   }
 
-  // --- UI PANEL EVENTS (unchanged API) ---
+  // --- UI PANEL EVENTS ---
   const uiPanel = new UIPanel(document.body);
 
   uiPanel.panelElement.addEventListener('generate', (e) => {
     const { width, height } = e.detail;
-    regenerateWorld(width, height);
+    regenerateWorld(width, height); // mesh size and segments follow W×H tiles
   });
 
   uiPanel.panelElement.addEventListener('terrain-tab-opened', () => {
@@ -186,7 +171,7 @@ window.onload = function () {
       pinMode = false; heightTool?.removeAllPins(); setFreeze(false, false);
     }
   });
-  uiPanel.panelElement.addEventListener('pin-toggle-request', (e) => { pinMode = !!(e.detail||{}).wantOn; });
+  uiPanel.panelElement.addEventListener('pin-toggle-request', (e) => { pinMode = !!(e.detail || {}).wantOn; });
   uiPanel.panelElement.addEventListener('height-set', (e) => {
     const { value } = e.detail || {};
     if (Number.isFinite(value)) currentHeightValue = Math.max(-50, Math.min(50, value | 0));
@@ -218,10 +203,10 @@ window.onload = function () {
 
   function collectPickables() {
     const pickables = [];
-    if (terrainMesh) pickables.push(terrainMesh);
-    for (const [, w] of waterMeshes) pickables.push(w);
-    markerGroup.children.forEach(c => pickables.push(c));
-    if (heightTool?.pinGroup) heightTool.pinGroup.children.forEach(c => pickables.push(c));
+    if (terrainMesh) pickables.push(terrainMesh);                 // base surface
+    for (const [, w] of waterMeshes) pickables.push(w);           // water tiles on top
+    markerGroup.children.forEach(c => pickables.push(c));         // red markers
+    if (heightTool?.pinGroup) heightTool.pinGroup.children.forEach(c => pickables.push(c)); // green pins
     return pickables;
   }
 
@@ -234,7 +219,7 @@ window.onload = function () {
     const up = new THREE.Vector2(e.clientX, e.clientY);
     const movedPx = downPos.distanceTo(up);
     const elapsed = (e.timeStamp || performance.now()) - downTime;
-    if (movedPx > 10 || elapsed > 500) return;
+    if (movedPx > 10 || elapsed > 500) return; // not a tap
 
     const rect = canvas.getBoundingClientRect();
     ndc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
@@ -271,7 +256,8 @@ window.onload = function () {
     }
     if (waterMeshes.size > 0) {
       for (const w of waterMeshes.values()) {
-        w.material.uniforms['time'].value += dt;
+        const u = w.material.uniforms;
+        if (u && u.time) u.time.value += dt;
       }
     }
     controls.update();
@@ -288,8 +274,11 @@ window.onload = function () {
     if (tx < 0 || tx >= gridWidth || tz < 0 || tz >= gridHeight) return;
     const key = tileKey(tx, tz);
     if (markedTiles.has(key)) return;
+
     const geo = new THREE.PlaneGeometry(1, 1);
-    const mat = new THREE.MeshBasicMaterial({ color: 0xff3333, transparent: true, opacity: 0.6, side: THREE.DoubleSide });
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xff3333, transparent: true, opacity: 0.6, side: THREE.DoubleSide
+    });
     const m = new THREE.Mesh(geo, mat);
     m.rotation.x = -Math.PI / 2;
     const wp = tileToWorld(tx, tz, gridWidth, gridHeight);
@@ -343,7 +332,7 @@ window.onload = function () {
     const oldType = paintedTileData.get(key);
     if (oldType === type) return;
 
-    // remove water if repainting
+    // remove water if repainting to solid
     if (waterMeshes.has(key)) {
       const oldWater = waterMeshes.get(key);
       scene.remove(oldWater);
@@ -362,7 +351,7 @@ window.onload = function () {
       const colors = terrainMesh.geometry.attributes.color;
       const wSeg = gridWidth;
 
-      // four vertices around tile (tl,tr,bl,br) on the (W,H) segmented plane
+      // four vertices around tile on (W,H)-segmented plane
       const v_tl = (tz)     * (wSeg + 1) + (tx);
       const v_tr = (tz)     * (wSeg + 1) + (tx + 1);
       const v_bl = (tz + 1) * (wSeg + 1) + (tx);
