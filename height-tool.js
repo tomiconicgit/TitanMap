@@ -2,22 +2,17 @@
 import * as THREE from 'three';
 
 /**
- * HeightTool operates on a single PlaneGeometry used as the terrain mesh:
- * - Stores a (w+1)*(h+1) height field.
- * - setTileHeight(tx,tz,val): raises the 4 corner vertices of that tile (unless pinned).
- * - Pins are per tile; pinning a tile locks its 4 corner vertices.
- * - Can show/hide green overlays for pinned tiles.
- *
- * IMPORTANT: Your terrain mesh is a PlaneGeometry lying in local XY with Z=0,
- * then the MESH is rotated -PI/2 about X to become the ground.
- * Therefore "vertical" => geometry's local Z component.
+ * HeightTool for a single PlaneGeometry terrain:
+ * - Stores a (w+1)*(h+1) heightfield (applied to geometry local Z, i.e. world Y).
+ * - setTileHeight(tx,tz,val): sets the four corner vertices of that tile unless pinned.
+ * - Pinned tiles lock their four corner vertices. Green overlays show pins while visible.
  */
 export class HeightTool {
   /**
    * @param {THREE.Scene} scene
    * @param {THREE.Mesh} terrainMesh
-   * @param {number} gridWidth number of tiles along X
-   * @param {number} gridHeight number of tiles along Z
+   * @param {number} gridWidth
+   * @param {number} gridHeight
    */
   constructor(scene, terrainMesh, gridWidth = 10, gridHeight = 10) {
     this.scene = scene;
@@ -25,13 +20,13 @@ export class HeightTool {
     this.gridWidth = gridWidth | 0;
     this.gridHeight = gridHeight | 0;
 
-    // (w+1)*(h+1) vertex heights (in world Y == local Z)
+    // (w+1)*(h+1) per-vertex heights (local Z => world Y after mesh rotation)
     this.heights = new Float32Array((this.gridWidth + 1) * (this.gridHeight + 1)).fill(0);
 
-    // pinned tile keys "tx,tz"
+    // pinned tiles => lock their 4 corner vertices
     this.pinned = new Set();
 
-    // green overlays for pins (visible only when you want to show pin mode UI)
+    // green overlay visuals for pinned tiles
     this.pinGroup = new THREE.Group();
     this.pinGroup.name = 'HeightPinsOverlay';
     this.pinGroup.visible = false;
@@ -45,32 +40,24 @@ export class HeightTool {
   _idx(vx, vz) { return vz * (this.gridWidth + 1) + vx; }
   _key(tx, tz) { return `${tx},${tz}`; }
 
-  /**
-   * Reinitialize when the terrain mesh or grid size changes.
-   */
   reset(terrainMesh, width, height) {
     this.terrainMesh = terrainMesh;
     this.gridWidth = width | 0;
     this.gridHeight = height | 0;
     this.heights = new Float32Array((this.gridWidth + 1) * (this.gridHeight + 1)).fill(0);
-    // keep the *set* of pinned tiles, but rebuild the visuals
     this._rebuildAllPinMeshes();
     this._applyHeightsToGeometry();
   }
 
-  // ---- pin overlays (green) ----
   setPinsVisible(v) { this.pinGroup.visible = !!v; }
 
   _rebuildAllPinMeshes() {
-    // clear visuals
     for (const [, m] of this.pinMeshes) {
       this.pinGroup.remove(m);
       m.geometry?.dispose?.();
       m.material?.dispose?.();
     }
     this.pinMeshes.clear();
-
-    // rebuild visuals for current pinned set
     for (const k of this.pinned) {
       const [tx, tz] = k.split(',').map(Number);
       this._ensurePinMesh(tx, tz);
@@ -101,7 +88,6 @@ export class HeightTool {
   }
 
   _tileCenterWorld(tx, tz) {
-    // same mapping used elsewhere: centered plane, each tile is 1x1
     return {
       x: tx - this.gridWidth / 2 + 0.5,
       z: tz - this.gridHeight / 2 + 0.5
@@ -116,16 +102,10 @@ export class HeightTool {
     return (v_tl + v_tr + v_bl + v_br) / 4;
   }
 
-  /**
-   * Toggle pin on a tile. Pinned tile locks its 4 corner vertices.
-   * Returns true if now pinned, false if unpinned.
-   */
   togglePin(tx, tz) {
     if (tx < 0 || tz < 0 || tx >= this.gridWidth || tz >= this.gridHeight) return false;
     const k = this._key(tx, tz);
-
     if (this.pinned.has(k)) {
-      // unpin
       this.pinned.delete(k);
       const m = this.pinMeshes.get(k);
       if (m) {
@@ -136,16 +116,12 @@ export class HeightTool {
       }
       return false;
     } else {
-      // pin
       this.pinned.add(k);
       this._ensurePinMesh(tx, tz);
       return true;
     }
   }
 
-  /**
-   * A vertex (vx,vz) is considered "blocked" if any of the 4 tiles that share it are pinned.
-   */
   _vertexBlocked(vx, vz) {
     const tiles = [
       [vx - 1, vz - 1], [vx, vz - 1],
@@ -158,10 +134,6 @@ export class HeightTool {
     return false;
   }
 
-  /**
-   * Set the height for the 4 vertices of tile (tx,tz) to "value", unless the vertex is blocked by a pin.
-   * Because vertices are shared, neighbours will slope naturally.
-   */
   setTileHeight(tx, tz, value) {
     if (tx < 0 || tz < 0 || tx >= this.gridWidth || tz >= this.gridHeight) return;
 
@@ -180,10 +152,6 @@ export class HeightTool {
     this._applyHeightsToGeometry();
   }
 
-  /**
-   * Write heights[] to geometry.local Z (which is world Y after mesh rotation),
-   * recompute normals, and nudge pin overlays vertically to follow.
-   */
   _applyHeightsToGeometry() {
     if (!this.terrainMesh) return;
     const pos = this.terrainMesh.geometry.attributes.position;
@@ -194,13 +162,15 @@ export class HeightTool {
     }
 
     for (let i = 0; i < this.heights.length; i++) {
+      // IMPORTANT: PlaneGeometry is XY plane; after mesh rotation,
+      // local Z corresponds to world Y (vertical).
       pos.setZ(i, this.heights[i]);
     }
     pos.needsUpdate = true;
     this.terrainMesh.geometry.computeVertexNormals();
     this.terrainMesh.geometry.computeBoundingSphere?.();
 
-    // keep green overlays sitting above the average height per tile
+    // keep pin overlays riding above local average height
     for (const [k, mesh] of this.pinMeshes) {
       const [tx, tz] = k.split(',').map(Number);
       mesh.position.y = this._tileAverageHeight(tx, tz) + 0.05;
