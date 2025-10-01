@@ -77,7 +77,8 @@ window.onload = function () {
     
     const terrainMat = new THREE.MeshStandardMaterial({
         vertexColors: true,
-        flatShading: false, // Use smooth shading for better slopes
+        flatShading: false,
+        side: THREE.DoubleSide // CORRECTED: Ensures raycaster can always hit the terrain
     });
 
     terrainMesh = new THREE.Mesh(terrainGeo, terrainMat);
@@ -328,7 +329,6 @@ window.onload = function () {
     water.rotation.x = -Math.PI / 2;
     const wp = tileToWorld(tx, tz, gridWidth, gridHeight);
     
-    // Water position will be set dynamically based on terrain height later if needed
     water.position.set(wp.x, 0.02, wp.z);
     if (water.material.uniforms.size) {
       water.material.uniforms.size.value = 10.0;
@@ -355,7 +355,6 @@ window.onload = function () {
 
     if (type === 'water') {
         const water = createWaterTile(tx, tz);
-        // We'll need to adjust water height based on terrain later
         scene.add(water);
         waterMeshes.set(key, water);
     } else {
@@ -403,22 +402,20 @@ window.onload = function () {
     const charTz = controller.tilePos?.tz ?? Math.floor(gridHeight / 2);
     const markers = [...markedTiles.keys()].map(k => k.split(',').map(Number));
 
-    // Serialize painted tile data from the new map
     const tiles = [];
     for (const [key, type] of paintedTileData.entries()) {
       const [tx, tz] = key.split(',').map(Number);
       tiles.push([tx, tz, type]);
     }
 
-    // Serialize height data from the HeightTool
     const height = {
       value: currentHeightValue,
-      pins: [...heightTool.pinned], // Save pinned tile keys
-      field: Array.from(heightTool.heights) // Convert Float32Array to a plain array for JSON
+      pins: [...heightTool.pinned],
+      field: Array.from(heightTool.heights)
     };
 
     return {
-      version: 9, // Updated version for new format
+      version: 9,
       timestamp: Date.now(),
       grid: { width: gridWidth, height: gridHeight },
       character: { tx: charTx, tz: charTz },
@@ -489,7 +486,7 @@ window.onload = function () {
     }
   }
 
-  // --- FREEZE HUD (RESTORED) ---
+  // --- FREEZE HUD ---
   function addFreezeToggle() {
     const style = document.createElement('style');
     style.textContent = `
