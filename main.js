@@ -1,7 +1,7 @@
 // file: main.js
 import * as THREE from 'three';
 import Viewport from './viewport.js';
-import CameraRig from './camera.js';
+import { createCamera } from './camera.js';
 import { createGrid } from './grid.js';
 import { createCharacter } from './character.js';
 import { worldToTile } from './grid-utils.js';
@@ -17,7 +17,7 @@ window.onload = function () {
   dirLight.position.set(5, 10, 7.5);
   scene.add(ambientLight, dirLight);
 
-  // 2) Grid + invisible ground for raycasting (10x10)
+  // 2) Grid + invisible ground for raycasting (10x10 world)
   const grid = createGrid();
   scene.add(grid);
 
@@ -37,12 +37,11 @@ window.onload = function () {
   character.position.set(spawn.x, character.position.y, spawn.z);
   scene.add(character);
 
-  // 4) Viewport + camera rig
+  // 4) Viewport + camera (with OrbitControls)
   const viewport = new Viewport();
-  const camRig = CameraRig.create();
+  const { camera, controls } = createCamera(viewport.renderer.domElement);
   viewport.scene = scene;
-  viewport.camera = camRig.threeCamera;
-  camRig.setTarget(character); // follow the red circle
+  viewport.camera = camera;
 
   // 5) Tap-to-move (tap, not drag)
   const raycaster = new THREE.Raycaster();
@@ -55,15 +54,16 @@ window.onload = function () {
   });
 
   canvas.addEventListener('pointerup', (e) => {
-    // Ignore drags
+    // Ignore drags (used for orbit/zoom)
     const up = new THREE.Vector2(e.clientX, e.clientY);
     if (downPos.distanceTo(up) > 5) return;
 
+    // Raycast the (invisible) ground
     const rect = canvas.getBoundingClientRect();
     ndc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
     ndc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
 
-    raycaster.setFromCamera(ndc, camRig.threeCamera);
+    raycaster.setFromCamera(ndc, camera);
     const hit = raycaster.intersectObject(groundPlane, false);
     if (hit.length === 0) return;
 
@@ -71,9 +71,15 @@ window.onload = function () {
     controller.moveTo(tx, tz);
   });
 
-  // 6) Loop — keep camera locked to character
+  // 6) Loop — follow the character + keep controls responsive
   viewport.onBeforeRender = (dt) => {
     controller.update(dt);
-    camRig.update();
+
+    // Lock the orbit focus to the character so the camera follows.
+    // (Do this every frame so it stays glued while the character moves.)
+    controls.target.copy(character.position);
+
+    // Smooth orbit/zoom/tilt
+    controls.update();
   };
 };
