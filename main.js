@@ -6,7 +6,6 @@ import { createCharacter } from './character.js';
 import { worldToTile } from './grid-utils.js';
 import { CharacterController } from './character-controller.js';
 
-// Wait for the window to load all resources, including the pathfinding script
 window.onload = function() {
   // 1. Scene and basic setup
   const scene = new THREE.Scene();
@@ -19,7 +18,6 @@ window.onload = function() {
   const grid = createGrid();
   scene.add(grid);
 
-  // A transparent plane for raycasting clicks
   const groundPlane = new THREE.Mesh(
     new THREE.PlaneGeometry(10, 10),
     new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide })
@@ -32,7 +30,6 @@ window.onload = function() {
   const character = createCharacter();
   const characterController = new CharacterController(character, startTile.tx, startTile.tz);
   
-  // Set initial position correctly, preserving the y-offset from createCharacter()
   const initialWorldPos = characterController.targetPosition;
   character.position.set(initialWorldPos.x, character.position.y, initialWorldPos.z);
   scene.add(character);
@@ -43,11 +40,27 @@ window.onload = function() {
   viewport.scene = scene;
   viewport.camera = camera;
 
-  // 4. Input Handling (Raycasting)
+  // 4. Input Handling (Corrected to distinguish tap vs. drag)
   const raycaster = new THREE.Raycaster();
   const pointer = new THREE.Vector2();
+  const pointerDownPos = new THREE.Vector2();
 
-  window.addEventListener('pointerdown', (event) => {
+  viewport.renderer.domElement.addEventListener('pointerdown', (event) => {
+    // Record the position where the pointer went down
+    pointerDownPos.set(event.clientX, event.clientY);
+  });
+
+  viewport.renderer.domElement.addEventListener('pointerup', (event) => {
+    // Calculate the distance the pointer moved
+    const pointerUpPos = new THREE.Vector2(event.clientX, event.clientY);
+    const dragDistance = pointerDownPos.distanceTo(pointerUpPos);
+
+    // If the pointer moved more than a few pixels, treat it as a camera drag and do nothing.
+    if (dragDistance > 5) {
+      return;
+    }
+
+    // This was a tap! Proceed with pathfinding.
     pointer.x = (event.clientX / window.innerWidth) * 2 - 1;
     pointer.y = - (event.clientY / window.innerHeight) * 2 + 1;
 
