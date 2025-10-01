@@ -4,7 +4,6 @@ import { tileToWorld } from './grid-utils.js';
 
 /**
  * Manages a single, unified terrain mesh for height and texture painting.
- * This replaces the old system of using one mesh per tile.
  */
 export class HeightTool {
   /**
@@ -28,6 +27,9 @@ export class HeightTool {
     this.pinGroup.name = 'PinnedTilesOverlay';
     scene.add(this.pinGroup);
     this.pinMeshes = new Map(); // key -> mesh
+
+    // Apply the initial zeroed heights to the mesh upon creation.
+    this.applyHeightsToMesh();
   }
 
   /** Get the index in the heights array for a given vertex coordinate. */
@@ -81,7 +83,6 @@ export class HeightTool {
       mesh.rotation.x = -Math.PI / 2;
       const wp = tileToWorld(tx, tz, this.gridWidth, this.gridHeight);
       
-      // Place the pin overlay at the correct average height of the tile's vertices
       const v_tl = this.heights[this.idx(tx, tz)];
       const v_tr = this.heights[this.idx(tx + 1, tz)];
       const v_bl = this.heights[this.idx(tx, tz + 1)];
@@ -113,7 +114,7 @@ export class HeightTool {
     if (tx < 0 || tz < 0 || tx >= this.gridWidth || tz >= this.gridHeight) return;
 
     const vertices = [
-      [tx,     tz],     // Top-Left
+      [tx,     tz],     // Top-Left vertex of the tile
       [tx + 1, tz],     // Top-Right
       [tx,     tz + 1], // Bottom-Left
       [tx + 1, tz + 1]  // Bottom-Right
@@ -141,7 +142,6 @@ export class HeightTool {
     pos.needsUpdate = true;
     this.terrainMesh.geometry.computeVertexNormals();
 
-    // After updating heights, reposition any pin overlays
     this.updatePinPositions();
   }
   
