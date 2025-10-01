@@ -36,7 +36,7 @@ export class Terrain {
     // Indexed geometry so height tool keeps shared vertices across tiles
     const geo = new THREE.PlaneGeometry(this.width, this.height, this.width, this.height);
 
-    // Build per-vertex color attribute (default mid gray)
+    // Per-vertex color attribute (default mid gray)
     const vertCount = geo.attributes.position.count;
     const colors = new Float32Array(vertCount * 3);
     for (let i = 0; i < vertCount; i++) {
@@ -72,21 +72,39 @@ export class Terrain {
     }
   }
 
+  /** Call this whenever vertex positions change (e.g., after height edits). */
+  onHeightsUpdated() {
+    if (this.showOutlines) this._rebuildEdges();
+  }
+
   _rebuildEdges() {
     if (!this.mesh) return;
+
     if (this.edgesMesh) {
       this.scene.remove(this.edgesMesh);
       this.edgesMesh.geometry?.dispose?.();
       this.edgesMesh.material?.dispose?.();
       this.edgesMesh = null;
     }
-    const eg = new THREE.EdgesGeometry(this.mesh.geometry);
-    const emat = new THREE.LineBasicMaterial({ color: 0x00aaff });
-    this.edgesMesh = new THREE.LineSegments(eg, emat);
+
+    // Use WireframeGeometry to include ALL internal grid edges
+    const wg = new THREE.WireframeGeometry(this.mesh.geometry);
+    const wmat = new THREE.LineBasicMaterial({
+      color: 0x00aaff,
+      transparent: true,
+      opacity: 0.85,
+      depthTest: false // always on top
+    });
+
+    this.edgesMesh = new THREE.LineSegments(wg, wmat);
+    this.edgesMesh.name = 'TerrainOutlines';
+    // match transform
     this.edgesMesh.position.copy(this.mesh.position);
     this.edgesMesh.rotation.copy(this.mesh.rotation);
-    this.edgesMesh.position.y += 0.001;
-    this.edgesMesh.renderOrder = 1;
+    // slight lift reduces accidental z-fight on steep slopes
+    this.edgesMesh.position.y += 0.002;
+    this.edgesMesh.renderOrder = 10;
+
     this.scene.add(this.edgesMesh);
   }
 
@@ -128,7 +146,7 @@ export class Terrain {
     return a * (1 - fz) + b * fz;
   }
 
-  /** Paints a single tile (tx,tz) by writing vertex colors of its 4 shared corners. */
+  /** Paint a single tile (tx,tz) by writing vertex colors of its 4 shared corners. */
   paintTileColor(tx, tz, colorAtCorner /* (fx,fz)=>THREE.Color */) {
     if (!this.mesh) return;
     if (tx < 0 || tz < 0 || tx >= this.width || tz >= this.height) return;
