@@ -17,7 +17,7 @@ window.onload = function () {
   dirLight.position.set(5, 10, 7.5);
   scene.add(ambientLight, dirLight);
 
-  // 2) Visual grid + invisible ground for raycasting (10x10)
+  // 2) Grid + invisible ground for raycasting (10x10)
   const grid = createGrid();
   scene.add(grid);
 
@@ -37,14 +37,12 @@ window.onload = function () {
   character.position.set(spawn.x, character.position.y, spawn.z);
   scene.add(character);
 
-  // 4) Viewport + camera rig (like your other PWA)
+  // 4) Viewport + camera rig
   const viewport = new Viewport();
   const camRig = CameraRig.create();
   viewport.scene = scene;
   viewport.camera = camRig.threeCamera;
-
-  // point the rig at the character
-  camRig.setTarget(character);
+  camRig.setTarget(character); // follow the red circle
 
   // 5) Tap-to-move (tap, not drag)
   const raycaster = new THREE.Raycaster();
@@ -61,7 +59,6 @@ window.onload = function () {
     const up = new THREE.Vector2(e.clientX, e.clientY);
     if (downPos.distanceTo(up) > 5) return;
 
-    // Proper NDC using the canvas rect
     const rect = canvas.getBoundingClientRect();
     ndc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
     ndc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
@@ -74,9 +71,9 @@ window.onload = function () {
     controller.moveTo(tx, tz);
   });
 
-  // 6) Loop
+  // 6) Loop — keep camera locked to character
   viewport.onBeforeRender = (dt) => {
     controller.update(dt);
-    camRig.update(); // keep the orbit camera locked onto the moving character
+    camRig.update();
   };
 };
