@@ -8,6 +8,11 @@ export default class Viewport {
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+
+    // SHADOWS ON
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
     document.body.appendChild(this.renderer.domElement);
 
     this.clock = new THREE.Clock();
