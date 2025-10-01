@@ -3,47 +3,62 @@ import Viewport from './viewport.js';
 import { createCamera } from './camera.js';
 import { createGrid } from './grid.js';
 import { createCharacter } from './character.js';
-import { tileToWorld } from './grid-utils.js'; // 1. Import the new utility
+import { worldToTile } from './grid-utils.js';
+import { CharacterController } from './character-controller.js';
 
-// Create a scene
+// 1. Scene and basic setup
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x111318);
-
-// Add some lights
 const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
-scene.add(ambientLight);
 const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
 directionalLight.position.set(5, 10, 7.5);
-scene.add(directionalLight);
+scene.add(ambientLight, directionalLight);
 
-// Add the grid to the scene
 const grid = createGrid();
 scene.add(grid);
 
-// Create the character
+// A transparent plane for raycasting clicks
+const groundPlane = new THREE.Mesh(
+  new THREE.PlaneGeometry(10, 10),
+  new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide })
+);
+groundPlane.rotation.x = -Math.PI / 2;
+scene.add(groundPlane);
+
+// 2. Character setup
+const startTile = { tx: 5, tz: 5 };
 const character = createCharacter();
+const characterController = new CharacterController(character, startTile.tx, startTile.tz);
+character.position.copy(characterController.targetPosition); // Initial position
 scene.add(character);
 
-// 2. Define character's position in TILE coordinates (from 0 to 9)
-const characterTilePos = { tx: 6, tz: 5 };
-
-// 3. Convert tile coordinates to world position and place the character
-const worldPos = tileToWorld(characterTilePos.tx, characterTilePos.tz);
-character.position.set(worldPos.x, 0.01, worldPos.z);
-
-
-// Initialize the viewport
+// 3. Viewport and Camera
 const viewport = new Viewport(); 
-
-// Create the camera and controls
 const { camera, controls } = createCamera(viewport.renderer.domElement);
-
-// Connect the scene and camera to the viewport
 viewport.scene = scene;
 viewport.camera = camera;
 
-// Update the camera target in the render loop
-viewport.onBeforeRender = () => {
+// 4. Input Handling (Raycasting)
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+
+window.addEventListener('pointerdown', (event) => {
+  pointer.x = (event.clientX / window.innerWidth) * 2 - 1;
+  pointer.y = - (event.clientY / window.innerHeight) * 2 + 1;
+
+  raycaster.setFromCamera(pointer, camera);
+  const intersects = raycaster.intersectObject(groundPlane);
+
+  if (intersects.length > 0) {
+    const point = intersects[0].point;
+    const { tx, tz } = worldToTile(point);
+    characterController.moveTo(tx, tz);
+  }
+});
+
+// 5. Render Loop
+viewport.onBeforeRender = (deltaTime) => {
+  characterController.update(deltaTime);
   controls.target.copy(character.position);
   controls.update(); 
 };
