@@ -7,6 +7,8 @@ import { createCharacter } from './character.js';
 import { worldToTile, tileToWorld } from './grid-utils.js';
 import { CharacterController } from './character-controller.js';
 import { UIPanel } from './ui-panel.js';
+// ⬇️ Water shader from three examples (your import map already maps three/addons/)
+import { Water } from 'three/addons/objects/Water.js';
 
 window.onload = function () {
   let gridWidth, gridHeight;
@@ -28,6 +30,7 @@ window.onload = function () {
   const terrainGroup = new THREE.Group();
   terrainGroup.name = 'TerrainPaint';
   const paintedTiles = new Map(); // key -> mesh
+  const waterTiles = new Set();   // track Water meshes to tick their time
 
   // Scene
   const scene = new THREE.Scene();
@@ -49,6 +52,12 @@ window.onload = function () {
   const { camera, controls } = createCamera(viewport.renderer.domElement);
   viewport.scene = scene;
   viewport.camera = camera;
+
+  // -------- Shared Water normals texture --------
+  const WATER_NORMALS_URL = './textures/waternormals.jpg';
+  const waterNormals = new THREE.TextureLoader().load(WATER_NORMALS_URL, (tex) => {
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  });
 
   // World generation
   function regenerateWorld(width, height) {
@@ -107,11 +116,9 @@ window.onload = function () {
     if (paintingMode) {
       paintingMode = false;
       currentPaintType = null;
-      uiPanel.clearTerrainSelection();
-      setFreeze(false, /*disableUI*/ false);
-    } else {
-      uiPanel.clearTerrainSelection();
     }
+    uiPanel.clearTerrainSelection();
+    setFreeze(false, /*disableUI*/ false);
   });
 
   // Terrain selection toggling
@@ -218,6 +225,15 @@ window.onload = function () {
       camera.position.add(delta);
       controls.target.add(delta);
     }
+
+    // Tick all water tiles
+    if (waterTiles.size) {
+      for (const w of waterTiles) {
+        const u = w.material?.uniforms;
+        if (u && u.time) u.time.value += dt;
+      }
+    }
+
     controls.update();
   };
 
@@ -262,29 +278,74 @@ window.onload = function () {
     grass:  new THREE.MeshStandardMaterial({ color: 0x2E7D32, roughness: 0.9,  metalness: 0.0, flatShading: true }),
     stone:  new THREE.MeshStandardMaterial({ color: 0x7D7D7D, roughness: 1.0,  metalness: 0.0, flatShading: true }),
     gravel: new THREE.MeshStandardMaterial({ color: 0x9A9A9A, roughness: 0.95, metalness: 0.0, flatShading: true }),
-    water:  new THREE.MeshStandardMaterial({ color: 0x2C6CC4, roughness: 0.2,  metalness: 0.0, transparent: true, opacity: 0.8 })
+    // 🆕 water handled specially with Water() below (kept here for reference only)
   };
+
+  function createWaterTile(tx, tz) {
+    // 1×1 tile water using three/examples/jsm/objects/Water
+    const geo = new THREE.PlaneGeometry(1, 1);
+    const water = new Water(geo, {
+      textureWidth: 256,
+      textureHeight: 256,
+      waterNormals,
+      sunDirection: dirLight.position.clone().normalize(),
+      sunColor: 0xffffff,
+      waterColor: 0x2066cc,   // pleasant blue
+      distortionScale: 1.85,
+      fog: !!scene.fog
+    });
+    water.rotation.x = -Math.PI / 2;
+    const wp = tileToWorld(tx, tz, gridWidth, gridHeight);
+    water.position.set(wp.x, 0.02, wp.z);
+
+    // set initial size of ripples; smaller value = tighter waves for tiny tiles
+    if (water.material.uniforms.size) {
+      water.material.uniforms.size.value = 0.8;
+    }
+
+    water.userData.type = 'water';
+    water.userData.isWater = true;
+    water.name = `Water_${tx},${tz}`;
+    return water;
+  }
 
   function paintTile(tx, tz, type) {
     if (tx < 0 || tx >= gridWidth || tz < 0 || tz >= gridHeight) return;
     const key = tileKey(tx, tz);
 
-    // Replace existing mesh for this tile if present
+    // Remove/replace existing mesh if present
     const old = paintedTiles.get(key);
     if (old) {
-      old.material = MATERIALS[type];
-      old.userData.type = type; // keep type updated for save
+      // If same type, nothing to do
+      if (old.userData?.type === type) return;
+
+      // If old was water, untrack
+      if (old.userData?.isWater) waterTiles.delete(old);
+
+      terrainGroup.remove(old);
+      old.geometry?.dispose?.();
+      // Water has unique material; dispose to prevent leaks
+      if (old.userData?.isWater) old.material?.dispose?.();
+      paintedTiles.delete(key);
+    }
+
+    if (type === 'water') {
+      const mesh = createWaterTile(tx, tz);
+      terrainGroup.add(mesh);
+      paintedTiles.set(key, mesh);
+      waterTiles.add(mesh);
       return;
     }
 
+    // Solid tile types
     const geo = new THREE.PlaneGeometry(1, 1);
-    const mat = MATERIALS[type];
+    const mat = MATERIALS[type] || MATERIALS.sand;
     const mesh = new THREE.Mesh(geo, mat);
     mesh.rotation.x = -Math.PI / 2;
     const wp = tileToWorld(tx, tz, gridWidth, gridHeight);
-    mesh.position.set(wp.x, 0.015, wp.z); // slightly above grid
+    mesh.position.set(wp.x, 0.015, wp.z);
     mesh.name = `Tile_${key}_${type}`;
-    mesh.userData.type = type; // record type for save
+    mesh.userData.type = type;
     terrainGroup.add(mesh);
     paintedTiles.set(key, mesh);
   }
@@ -293,9 +354,10 @@ window.onload = function () {
     for (const [, mesh] of paintedTiles) {
       terrainGroup.remove(mesh);
       mesh.geometry?.dispose?.();
-      // materials are shared; do not dispose shared MATERIALS
+      if (mesh.userData?.isWater) mesh.material?.dispose?.();
     }
     paintedTiles.clear();
+    waterTiles.clear();
   }
 
   // -------- Save/Load helpers --------
@@ -316,7 +378,7 @@ window.onload = function () {
     }
 
     return {
-      version: 6,
+      version: 7,
       timestamp: Date.now(),
       grid: { width: gridWidth, height: gridHeight },
       character: { tx: charTx, tz: charTz },
@@ -330,9 +392,9 @@ window.onload = function () {
       },
       markers,
       terrain: {
-        paintingMode: false,          // always off on save/load for safety
-        selected: null,               // none selected after load
-        tiles                            // <—— painted tiles data
+        paintingMode: false, // always OFF on save
+        selected: null,
+        tiles
       }
     };
   }
@@ -370,13 +432,13 @@ window.onload = function () {
         if (!Array.isArray(t) || t.length < 3) continue;
         const px = Number(t[0]), pz = Number(t[1]);
         const type = String(t[2]);
-        if (Number.isFinite(px) && Number.isFinite(pz) && MATERIALS[type]) {
+        if (Number.isFinite(px) && Number.isFinite(pz)) {
           paintTile(px, pz, type);
         }
       }
     }
 
-    // Restore (or default) freeze
+    // Restore freeze (kept OFF unless explicitly saved ON)
     setFreeze(!!data.settings?.freezeTapToMove, /*disableUI*/ false);
 
     // Camera
