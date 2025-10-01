@@ -1,20 +1,9 @@
 // file: marker.js
 import * as THREE from 'three';
 
-function tileKey(tx, tz) { return `${tx},${tz}`; }
+const key = (tx, tz) => `${tx},${tz}`;
 
-/**
- * MarkerTool manages temporary red highlights for tiles you tap while
- * marker mode is ON. When you turn marker mode OFF, you can fetch the
- * set of marked tiles and make them non-walkable elsewhere.
- */
 export class MarkerTool {
-  /**
-   * @param {THREE.Scene} scene
-   * @param {function(number, number, number, number): {x:number,z:number}} tileToWorld
-   * @param {number} gridWidth
-   * @param {number} gridHeight
-   */
   constructor(scene, tileToWorld, gridWidth = 10, gridHeight = 10) {
     this.scene = scene;
     this.tileToWorld = tileToWorld;
@@ -23,59 +12,59 @@ export class MarkerTool {
 
     this.group = new THREE.Group();
     this.group.name = 'MarkerLayer';
+    this.group.visible = false;
     this.scene.add(this.group);
 
-    // "tx,tz" -> Mesh (red overlay)
-    this.tempMarks = new Map();
+    this.overlays = new Map();
   }
 
   setGridSize(w, h) {
     this.gridWidth = w | 0;
     this.gridHeight = h | 0;
-    this.clearAll(); // reset visuals on resize
+    this.clearAll();
   }
 
-  /** Add a red overlay on the given tile (no-op if out of bounds or already marked) */
+  syncToKeys(keysIterable) {
+    for (const k of keysIterable) {
+      const [txStr, tzStr] = String(k).split(',');
+      const tx = Number(txStr), tz = Number(tzStr);
+      if (!Number.isFinite(tx) || !Number.isFinite(tz)) continue;
+      this._ensureOverlay(tx, tz);
+    }
+  }
+
   mark(tx, tz) {
     if (tx < 0 || tz < 0 || tx >= this.gridWidth || tz >= this.gridHeight) return;
-    const key = tileKey(tx, tz);
-    if (this.tempMarks.has(key)) return;
+    this._ensureOverlay(tx, tz);
+  }
+
+  _ensureOverlay(tx, tz) {
+    const k = key(tx, tz);
+    if (this.overlays.has(k)) return;
 
     const geo = new THREE.PlaneGeometry(1, 1);
-    const mat = new THREE.MeshBasicMaterial({
-      color: 0xff3333,
-      transparent: true,
-      opacity: 0.6,
-      side: THREE.DoubleSide
-    });
+    const mat = new THREE.MeshBasicMaterial({ color: 0xff3333, transparent: true, opacity: 0.6, side: THREE.DoubleSide });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.rotation.x = -Math.PI / 2;
 
     const wp = this.tileToWorld(tx, tz, this.gridWidth, this.gridHeight);
     mesh.position.set(wp.x, 0.02, wp.z);
-    mesh.name = `Marker_${key}`;
+    mesh.name = `Marker_${k}`;
 
     this.group.add(mesh);
-    this.tempMarks.set(key, mesh);
+    this.overlays.set(k, mesh);
   }
 
-  /** Returns an array of keys "tx,tz" for currently marked tiles */
-  getMarkedKeys() {
-    return [...this.tempMarks.keys()];
-  }
+  getMarkedKeys() { return [...this.overlays.keys()]; }
 
-  /** Remove all red overlays and free GPU resources */
   clearAll() {
-    for (const [, mesh] of this.tempMarks) {
+    for (const [, mesh] of this.overlays) {
       this.group.remove(mesh);
       mesh.geometry?.dispose?.();
       mesh.material?.dispose?.();
     }
-    this.tempMarks.clear();
+    this.overlays.clear();
   }
 
-  /** Hide or show the whole layer (for quick visibility flips) */
-  setVisible(v) {
-    this.group.visible = !!v;
-  }
+  setVisible(v) { this.group.visible = !!v; }
 }
