@@ -21,6 +21,11 @@ window.onload = function () {
   dirLight.position.set(5, 10, 7.5);
   scene.add(dirLight);
 
+  // --- Character FIRST (so regenerateWorld can safely reference it) ---
+  const character = createCharacter();
+  scene.add(character);
+  character.position.set(0, 0.35, 0);
+
   // --- Landscape (10x10 by default) ---
   let terrainMesh = null;
   let gridWidth = 10, gridHeight = 10;
@@ -29,7 +34,11 @@ window.onload = function () {
     gridWidth = width;
     gridHeight = height;
 
-    if (terrainMesh) scene.remove(terrainMesh);
+    if (terrainMesh) {
+      scene.remove(terrainMesh);
+      terrainMesh.geometry?.dispose?.();
+      terrainMesh.material?.dispose?.();
+    }
 
     const geo = new THREE.PlaneGeometry(width, height, width, height);
     const mat = new THREE.MeshStandardMaterial({
@@ -43,21 +52,16 @@ window.onload = function () {
     terrainMesh.name = `Terrain_${width}x${height}`;
     scene.add(terrainMesh);
 
-    // reset character to center
-    const cx = 0, cz = 0;
-    character.position.set(cx, 0.35, cz);
+    // reset character to center if present
+    if (character) character.position.set(0, 0.35, 0);
 
     controls.target.set(0, 0, 0);
     camera.position.set(3, 6, 9);
     controls.update();
   }
 
+  // Now safe to generate
   regenerateWorld(10, 10);
-
-  // --- Character ---
-  const character = createCharacter();
-  scene.add(character);
-  character.position.set(0, 0.35, 0);
 
   // --- UI Panel ---
   const uiPanel = new UIPanel(document.body);
@@ -109,7 +113,7 @@ window.onload = function () {
   });
 
   // --- Loop ---
-  viewport.onBeforeRender = (dt) => {
+  viewport.onBeforeRender = () => {
     controls.update();
   };
 };
