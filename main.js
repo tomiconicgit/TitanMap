@@ -62,6 +62,141 @@ window.onload = function () {
   // Global time so ALL water tiles animate in sync
   let waterGlobalTime = 0;
 
+  // ======== Procedural SAND (shared material) ========
+  // Perlin noise (compact, deterministic) for texture generation
+  class Perlin {
+    constructor(seed = 1337) {
+      this.p = new Uint8Array(512);
+      const perm = new Uint8Array(256);
+      let s = seed >>> 0;
+      const rnd = () => (s = (s * 1664525 + 1013904223) >>> 0) / 0xffffffff;
+      for (let i = 0; i < 256; i++) perm[i] = i;
+      for (let i = 255; i > 0; i--) {
+        const j = (rnd() * (i + 1)) | 0;
+        const t = perm[i]; perm[i] = perm[j]; perm[j] = t;
+      }
+      for (let i = 0; i < 512; i++) this.p[i] = perm[i & 255];
+    }
+    fade(t){ return t*t*t*(t*(t*6-15)+10); }
+    lerp(a,b,t){ return a+(b-a)*t; }
+    grad(hash, x, y) {
+      const h = hash & 3;
+      const u = h < 2 ? x : y;
+      const v = h < 2 ? y : x;
+      return ((h & 1) ? -u : u) + ((h & 2) ? -2*v : 2*v) * 0.5;
+    }
+    noise(x, y) {
+      const X = Math.floor(x) & 255, Y = Math.floor(y) & 255;
+      x -= Math.floor(x); y -= Math.floor(y);
+      const u = this.fade(x), v = this.fade(y);
+      const A = this.p[X] + Y, B = this.p[X+1] + Y;
+      return this.lerp(
+        this.lerp(this.grad(this.p[A], x, y), this.grad(this.p[B], x-1, y), u),
+        this.lerp(this.grad(this.p[A+1], x, y-1), this.grad(this.p[B+1], x-1, y-1), u),
+        v
+      );
+    }
+  }
+
+  // Config for dune direction & scales (tweak to taste)
+  const SAND_WIND_DIR = Math.PI * 0.25; // 45°
+  const SAND_NORMAL_SIZE = 512;         // generated normal map resolution
+  const SAND_REPEAT = 6;                // repeats per world unit (affects world-space UV scaling)
+  const SAND_COLOR = 0xD8C6A3;          // base sand albedo
+
+  // Generate a directional-ripple sand normal map (DataTexture)
+  function generateSandNormalMap(size = SAND_NORMAL_SIZE, windAngle = SAND_WIND_DIR) {
+    const data = new Uint8Array(size * size * 4);
+    const pRip = new Perlin(12345);
+    const pMed = new Perlin(54321);
+    const pFine = new Perlin(77777);
+
+    // rotate coords to align ripples with wind
+    const cosA = Math.cos(windAngle), sinA = Math.sin(windAngle);
+
+    // multi-scale height field
+    const hAt = (nx, ny) => {
+      // rotate normalized coords
+      const ax = nx * cosA + ny * sinA;
+      const ay = -nx * sinA + ny * cosA;
+
+      // elongated ripples (ax long, ay short), plus medium & fine detail
+      const ripples = pRip.noise(ax * 28.0, ay * 9.0) * 1.3;
+      const medium  = pMed.noise(nx * 10.0, ny * 10.0) * 0.35;
+      const fine    = pFine.noise(nx * 65.0, ny * 65.0) * 0.15;
+      return ripples + medium + fine;
+    };
+
+    const strength = 40; // normal intensity
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const nx = x / size, ny = y / size;
+
+        // central height
+        const h = hAt(nx, ny);
+
+        // finite differences for slope
+        const hL = hAt((x-1+size)%size/size, ny);
+        const hR = hAt((x+1)%size/size, ny);
+        const hU = hAt(nx, (y-1+size)%size/size);
+        const hD = hAt(nx, (y+1)%size/size);
+
+        const dx = hR - hL;
+        const dy = hD - hU;
+
+        const i = (y * size + x) * 4;
+        data[i    ] = Math.max(0, Math.min(255, 128 + strength * dx)); // X
+        data[i + 1] = Math.max(0, Math.min(255, 128 + strength * dy)); // Y
+        data[i + 2] = 255;                                              // Z
+        data[i + 3] = 255;
+      }
+    }
+
+    const tex = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.needsUpdate = true;
+    return tex;
+  }
+
+  // Subtle albedo variation map (optional)
+  function generateSandAlbedo(size = 256, windAngle = SAND_WIND_DIR) {
+    const data = new Uint8Array(size * size * 3);
+    const p = new Perlin(424242);
+    const cosA = Math.cos(windAngle), sinA = Math.sin(windAngle);
+    const base = new THREE.Color(SAND_COLOR);
+
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const nx = x / size, ny = y / size;
+        const ax = nx * cosA + ny * sinA;
+        const ay = -nx * sinA + ny * cosA;
+        const v = 0.5 * p.noise(ax * 6.0, ay * 2.0) + 0.5; // [0..1]
+        // brighten slightly on crests
+        const c = base.clone().multiplyScalar(0.92 + v * 0.12);
+        const i = (y * size + x) * 3;
+        data[i] = Math.round(c.r * 255);
+        data[i+1] = Math.round(c.g * 255);
+        data[i+2] = Math.round(c.b * 255);
+      }
+    }
+    const tex = new THREE.DataTexture(data, size, size, THREE.RGBFormat);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.needsUpdate = true;
+    return tex;
+  }
+
+  // Shared sand textures/material
+  const SAND_NORMAL_TEX = generateSandNormalMap();
+  const SAND_ALBEDO_TEX = generateSandAlbedo();
+  const SAND_MATERIAL = new THREE.MeshStandardMaterial({
+    color: 0xffffff,            // let the albedo map set the color
+    map: SAND_ALBEDO_TEX,
+    roughness: 0.95,
+    metalness: 0.0,
+    normalMap: SAND_NORMAL_TEX,
+    normalScale: new THREE.Vector2(1.0, 1.0)
+  });
+
   // World generation
   function regenerateWorld(width, height) {
     gridWidth = width;
@@ -276,7 +411,7 @@ window.onload = function () {
 
   // -------- Terrain painting --------
   const MATERIALS = {
-    sand:   new THREE.MeshStandardMaterial({ color: 0xD8C6A3, roughness: 0.95, metalness: 0.0, flatShading: true }),
+    // These remain flat-color; sand is special and uses SAND_MATERIAL
     dirt:   new THREE.MeshStandardMaterial({ color: 0x6F451F, roughness: 0.95, metalness: 0.0, flatShading: true }),
     grass:  new THREE.MeshStandardMaterial({ color: 0x2E7D32, roughness: 0.9,  metalness: 0.0, flatShading: true }),
     stone:  new THREE.MeshStandardMaterial({ color: 0x7D7D7D, roughness: 1.0,  metalness: 0.0, flatShading: true }),
@@ -284,17 +419,29 @@ window.onload = function () {
     // water handled specially with Water() below
   };
 
-  function createWaterTile(tx, tz) {
-    // Build a 1×1 plane BUT give it world-space UVs so neighbors are seamless
-    const geo = new THREE.PlaneGeometry(1, 1);
-
-    // Compute world edges of this tile
+  // Helpers to set world-space UVs so patterns are continuous across tiles
+  function setWorldSpaceUVs(geo, tx, tz, scale = SAND_REPEAT) {
+    // World edges of this 1×1 tile
     const center = tileToWorld(tx, tz, gridWidth, gridHeight);
     const x0 = center.x - 0.5, x1 = center.x + 0.5;
     const z0 = center.z - 0.5, z1 = center.z + 0.5;
 
-    // Override UVs with world-space mapping (so textures ripple continuously)
-    // (Keep a scale of 1.0 = one texture repeat per world unit; tweak if you like)
+    const uvs = new Float32Array([
+      x0 * scale, z1 * scale,
+      x1 * scale, z1 * scale,
+      x0 * scale, z0 * scale,
+      x1 * scale, z0 * scale
+    ]);
+    geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+  }
+
+  function createWaterTile(tx, tz) {
+    const geo = new THREE.PlaneGeometry(1, 1);
+
+    // world-space UVs for seamless normals
+    const center = tileToWorld(tx, tz, gridWidth, gridHeight);
+    const x0 = center.x - 0.5, x1 = center.x + 0.5;
+    const z0 = center.z - 0.5, z1 = center.z + 0.5;
     const UV_SCALE = 1.0;
     const uvs = new Float32Array([
       x0 * UV_SCALE, z1 * UV_SCALE,
@@ -311,22 +458,20 @@ window.onload = function () {
       sunDirection: dirLight.position.clone().normalize(),
       sunColor: 0xffffff,
       waterColor: 0x2066cc,
-      distortionScale: 3.7,                       // strong distortion like the demo
+      distortionScale: 3.7,
       fog: !!scene.fog
     });
 
-    // Match the ocean demo look (bigger waves across the whole body)
+    // “Ocean” look: larger ripples
     if (water.material.uniforms.size) {
-      water.material.uniforms.size.value = 10;    // key change for “big” ripples
+      water.material.uniforms.size.value = 10;
     }
-    // Start with the global time so new tiles sync immediately
     if (water.material.uniforms.time) {
       water.material.uniforms.time.value = waterGlobalTime;
     }
 
     water.rotation.x = -Math.PI / 2;
     water.position.set(center.x, 0.02, center.z);
-
     water.userData.type = 'water';
     water.userData.isWater = true;
     water.name = `Water_${tx},${tz}`;
@@ -348,6 +493,7 @@ window.onload = function () {
       paintedTiles.delete(key);
     }
 
+    // WATER
     if (type === 'water') {
       const mesh = createWaterTile(tx, tz);
       terrainGroup.add(mesh);
@@ -356,9 +502,24 @@ window.onload = function () {
       return;
     }
 
-    // Solid tile types
+    // SAND (procedural + seamless across tiles)
+    if (type === 'sand') {
+      const geo = new THREE.PlaneGeometry(1, 1);
+      setWorldSpaceUVs(geo, tx, tz, SAND_REPEAT);
+      const mesh = new THREE.Mesh(geo, SAND_MATERIAL);
+      mesh.rotation.x = -Math.PI / 2;
+      const wp = tileToWorld(tx, tz, gridWidth, gridHeight);
+      mesh.position.set(wp.x, 0.015, wp.z);
+      mesh.name = `Tile_${key}_sand`;
+      mesh.userData.type = 'sand';
+      terrainGroup.add(mesh);
+      paintedTiles.set(key, mesh);
+      return;
+    }
+
+    // Other solid tile types (flat)
     const geo = new THREE.PlaneGeometry(1, 1);
-    const mat = MATERIALS[type] || MATERIALS.sand;
+    const mat = MATERIALS[type] || MATERIALS.gravel;
     const mesh = new THREE.Mesh(geo, mat);
     mesh.rotation.x = -Math.PI / 2;
     const wp = tileToWorld(tx, tz, gridWidth, gridHeight);
@@ -397,7 +558,7 @@ window.onload = function () {
     }
 
     return {
-      version: 9,
+      version: 10,
       timestamp: Date.now(),
       grid: { width: gridWidth, height: gridHeight },
       character: { tx: charTx, tz: charTz },
@@ -413,7 +574,9 @@ window.onload = function () {
       terrain: {
         paintingMode: false, // always OFF on save
         selected: null,
-        tiles
+        tiles,
+        // store sand/wind config in case you want to tweak later
+        sand: { windDir: SAND_WIND_DIR, repeat: SAND_REPEAT }
       }
     };
   }
