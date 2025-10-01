@@ -8,35 +8,57 @@ import { worldToTile, tileToWorld } from './grid-utils.js';
 import { CharacterController } from './character-controller.js';
 import { UIPanel } from './ui-panel.js';
 import { Water } from 'three/addons/objects/Water.js';
-import { HeightTool } from './height-tool.js';
+
+// -----------------------------------------------------------------------------
+// High-level notes
+// - Flat editing, pathfinding and painting remain as before.
+// - New Height tool sculpts a shared vertex height field (heightGrid).
+//   We render it as a single deformable mesh (terrainMesh) with w×h segments.
+// - Pin mode (green tiles) prevents those tiles' corners from moving. Any height
+//   differences along edges to non-pinned neighbors get a vertical "wall" quad.
+// - Height step is 0.2, range [-50, 50]. Saved to file along with pins.
+// -----------------------------------------------------------------------------
 
 window.onload = function () {
   let gridWidth, gridHeight;
-  let gridGroup, groundPlane;
+  let gridGroup;               // lines
+  let groundPlane;             // invisible input plane (kept flat for simple tile picking)
+  let terrainMesh;             // sculptable mesh driven by heightGrid
+  let cliffGroup;              // holds the vertical walls along discontinuities
+
+  // Shared discrete height field at grid vertices (size: (w+1) × (h+1))
+  // heightGrid[vx][vz] in world units (meters)
+  let heightGrid = [];         // created on regenerateWorld
+  const HEIGHT_STEP = 0.2;     // requested finer steps
+  const HEIGHT_MIN  = -50.0;
+  const HEIGHT_MAX  = +50.0;
+
+  // Pin state per tile (w × h) — green-highlighted tiles
+  // pinTiles[tx][tz] = true|false
+  let pinTiles = [];
+
+  // Painting
+  let paintingMode = false;
+  let currentPaintType = null; // 'sand'|'dirt'|'grass'|'stone'|'gravel'|'water'|null
+  const terrainGroup = new THREE.Group(); // container for painted tiles & water tiles
+  terrainGroup.name = 'TerrainPaint';
+  const paintedTiles = new Map(); // "tx,tz" -> mesh
+  const waterTiles = new Set();   // Water() meshes to tick time
+
+  // Height tool
+  let heightMode = false;  // toggle #1 (enables sculpting, auto-freezes move)
+  let pinMode = false;     // toggle #2 (select green pinned tiles)
+  let desiredHeight = 0;   // UI-selected height value
+
+  // Marker mode (unchanged)
+  let markerMode = false;
+  const markerGroup = new THREE.Group();
+  markerGroup.name = 'MarkerLayer';
+  const markedTiles = new Map(); // "tx,tz" -> mesh
 
   // Freeze toggle (top-left HUD)
   let freezeTapToMove = false;
   let freezeCheckboxEl = null;
-
-  // Marker Mode
-  let markerMode = false;
-  const markerGroup = new THREE.Group();
-  markerGroup.name = 'MarkerLayer';
-  const markedTiles = new Map(); // key "x,y" -> mesh
-
-  // Terrain Painting Mode
-  let paintingMode = false;
-  let currentPaintType = null; // 'sand'|'dirt'|'grass'|'stone'|'gravel'|'water'|null
-  const terrainGroup = new THREE.Group();
-  terrainGroup.name = 'TerrainPaint';
-  const paintedTiles = new Map(); // key -> mesh
-  const waterTiles = new Set();   // track Water meshes to tick their time
-
-  // Height tool state
-  let heightMode = false;
-  let pinMode = false;
-  let currentHeightValue = 0;
-  let heightTool = null;
 
   // Scene
   const scene = new THREE.Scene();
@@ -59,184 +81,184 @@ window.onload = function () {
   viewport.scene = scene;
   viewport.camera = camera;
 
-  // -------- Shared Water normals texture (local file) --------
+  // Water normals (local path — you said you have it)
   const WATER_NORMALS_URL = './textures/waternormals.jpg';
   const waterNormals = new THREE.TextureLoader().load(WATER_NORMALS_URL, (tex) => {
     tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   });
 
-  // World generation
-  function regenerateWorld(width, height) {
-    gridWidth = width;
-    gridHeight = height;
+  // ---------- World regen ----------
+  function make2D(w, h, fill = 0) {
+    const a = new Array(w);
+    for (let x = 0; x < w; x++) {
+      a[x] = new Array(h);
+      for (let y = 0; y < h; y++) a[x][y] = fill;
+    }
+    return a;
+  }
 
+  function regenerateWorld(width, height) {
+    gridWidth = width|0;
+    gridHeight = height|0;
+
+    // remove old
     if (gridGroup) scene.remove(gridGroup);
     if (groundPlane) scene.remove(groundPlane);
+    if (terrainMesh) { scene.remove(terrainMesh); terrainMesh.geometry.dispose(); terrainMesh.material.dispose(); }
+    if (cliffGroup) { scene.remove(cliffGroup); cliffGroup.clear(); }
 
-    gridGroup = createGrid(width, height);
+    gridGroup = createGrid(gridWidth, gridHeight);
     scene.add(gridGroup);
 
+    // Flat picking plane (always flat for simple tile math)
     groundPlane = new THREE.Mesh(
-      new THREE.PlaneGeometry(width, height),
-      new THREE.MeshBasicMaterial({
-        color: 0x000000,
-        transparent: true,
-        opacity: 0.0,
-        side: THREE.DoubleSide,
-        depthWrite: false
-      })
+      new THREE.PlaneGeometry(gridWidth, gridHeight),
+      new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.0, side: THREE.DoubleSide, depthWrite: false })
     );
+    groundPlane.name = 'TapPlane';
     groundPlane.rotation.x = -Math.PI / 2;
     groundPlane.position.set(0, 0, 0);
-    groundPlane.name = 'TapPlane';
     groundPlane.frustumCulled = false;
     scene.add(groundPlane);
 
-    // Clear markers & painted tiles on grid change
+    // Height grid & pins reset
+    heightGrid = make2D(gridWidth + 1, gridHeight + 1, 0);
+    pinTiles   = make2D(gridWidth, gridHeight, false);
+
+    // Sculptable mesh (w×h segments, 1m per tile)
+    terrainMesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(gridWidth, gridHeight, gridWidth, gridHeight),
+      new THREE.MeshStandardMaterial({
+        color: 0x24262b,
+        roughness: 1.0,
+        metalness: 0.0,
+        side: THREE.DoubleSide,
+        flatShading: true
+      })
+    );
+    terrainMesh.rotation.x = -Math.PI / 2;
+    terrainMesh.position.set(0, 0, 0);
+    terrainMesh.receiveShadow = true;
+    terrainMesh.name = 'SculptMesh';
+    scene.add(terrainMesh);
+
+    // Vertical “cliff” quads live here
+    cliffGroup = new THREE.Group();
+    cliffGroup.name = 'Cliffs';
+    scene.add(cliffGroup);
+
+    // Clear overlays
     clearAllMarkers();
     clearAllPainted();
 
-    // Init/Reset height tool
-    if (!heightTool) heightTool = new HeightTool(scene, paintedTiles, width, height);
-    else heightTool.reset(width, height);
-
-    controller.updateGridSize(width, height);
-
-    const cTx = Math.floor(width / 2);
-    const cTz = Math.floor(height / 2);
+    // Controller + camera to center
+    controller.updateGridSize(gridWidth, gridHeight);
+    const cTx = Math.floor(gridWidth / 2);
+    const cTz = Math.floor(gridHeight / 2);
     controller.resetTo(cTx, cTz);
 
-    const center = tileToWorld(cTx, cTz, width, height);
+    const center = tileToWorld(cTx, cTz, gridWidth, gridHeight);
     controls.target.copy(center);
     camera.position.set(center.x + 2, 6, center.z + 8);
     controls.update();
+
+    // Sync mesh vertices from (all-zero) heightGrid
+    applyHeightGridToMesh();
+    rebuildCliffsAll();
   }
 
-  // UI Panel
+  // ---------- UI ----------
   const uiPanel = new UIPanel(document.body);
 
-  // Grid generate handler
   uiPanel.panelElement.addEventListener('generate', (e) => {
     const { width, height } = e.detail;
     regenerateWorld(width, height);
   });
 
-  // When Terrain tab is opened: ensure NO selection and turn painting OFF + unfreeze
+  // Terrain Tab
   uiPanel.panelElement.addEventListener('terrain-tab-opened', () => {
-    if (paintingMode) {
-      paintingMode = false;
-      currentPaintType = null;
-    }
+    // stop painting & unfreeze
+    if (paintingMode) { paintingMode = false; currentPaintType = null; }
     uiPanel.clearTerrainSelection();
-    if (!heightMode && !markerMode) setFreeze(false, /*disableUI*/ false);
+    setFreeze(false, false);
   });
 
-  // Terrain selection toggling
   uiPanel.panelElement.addEventListener('terrain-select', (e) => {
     const { type, active } = e.detail || {};
     if (!type) return;
-
     if (active) {
-      // If marker or height mode is on, turn them off first
+      // stop other modes
       if (markerMode) { markerMode = false; uiPanel.setMarkerToggle(false); }
-      if (heightMode) {
-        heightMode = false; pinMode = false;
-        heightTool?.removeAllPins();
-      }
+      if (heightMode) { setHeightMode(false); }
       currentPaintType = type;
       paintingMode = true;
-      setFreeze(true, /*disableUI*/ true); // freeze move while painting
+      setFreeze(true, true);
     } else {
-      // stop painting
       paintingMode = false;
       currentPaintType = null;
-      setFreeze(false, /*disableUI*/ false);
+      setFreeze(false, false);
     }
   });
 
-  // ===== Marker Mode drives Freeze =====
+  // Marker Mode
   uiPanel.panelElement.addEventListener('marker-toggle-request', (e) => {
     const { wantOn } = e.detail || {};
     if (wantOn) {
-      // If painting or height, stop them first
-      if (paintingMode) {
-        paintingMode = false;
-        currentPaintType = null;
-        uiPanel.clearTerrainSelection();
-      }
-      if (heightMode) {
-        heightMode = false; pinMode = false;
-        heightTool?.removeAllPins();
-      }
+      // cancel paint & height
+      if (paintingMode) { paintingMode = false; currentPaintType = null; uiPanel.clearTerrainSelection(); }
+      if (heightMode)   { setHeightMode(false); }
       markerMode = true;
-      setFreeze(true, /*disableUI*/ true);
+      setFreeze(true, true);
     } else {
       markerMode = false;
       controller.applyNonWalkables([...markedTiles.keys()]);
-      setFreeze(false, /*disableUI*/ false);
+      setFreeze(false, false);
     }
   });
 
-  // ===== Height tool wiring =====
-  uiPanel.panelElement.addEventListener('height-tab-opened', () => {
-    // no-op (keep current value)
+  // Height Tab
+  uiPanel.panelElement.addEventListener('height-mode-toggle', (e) => {
+    const { on } = e.detail || {};
+    setHeightMode(!!on);
   });
 
-  // Toggle 1: Height Mode
-  uiPanel.panelElement.addEventListener('height-toggle-request', (e) => {
-    const { wantOn } = e.detail || {};
-    heightMode = !!wantOn;
-
-    if (heightMode) {
-      // turn off other modes
-      if (markerMode) { markerMode = false; uiPanel.setMarkerToggle(false); }
-      if (paintingMode) { paintingMode = false; currentPaintType = null; uiPanel.clearTerrainSelection(); }
-      setFreeze(true, /*disableUI*/ true);
-    } else {
-      // Exiting height mode: clear pin highlights and unfreeze
-      pinMode = false;
-      heightTool?.removeAllPins();
-      setFreeze(false, /*disableUI*/ false);
-    }
+  uiPanel.panelElement.addEventListener('height-pin-toggle', (e) => {
+    pinMode = !!(e.detail?.on);
+    // When entering Pin mode we keep Height mode ON, but taps only toggle pins.
   });
 
-  // Toggle 2: Pin Mode
-  uiPanel.panelElement.addEventListener('pin-toggle-request', (e) => {
-    const { wantOn } = e.detail || {};
-    pinMode = !!wantOn;
-    // While pin mode is ON, taps toggle green highlights; heights are not applied.
+  uiPanel.panelElement.addEventListener('height-change', (e) => {
+    // Expected: { value } numeric, clamped step of 0.2
+    let v = Number(e.detail?.value ?? 0);
+    if (!Number.isFinite(v)) v = 0;
+    v = Math.max(HEIGHT_MIN, Math.min(HEIGHT_MAX, v));
+    // Snap to 0.2 step to prevent tiny floating errors
+    desiredHeight = Math.round(v / HEIGHT_STEP) * HEIGHT_STEP;
+    uiPanel.setHeightDisplay(desiredHeight);
   });
 
-  // Height numeric value
-  uiPanel.panelElement.addEventListener('height-set', (e) => {
-    const { value } = e.detail || {};
-    if (Number.isFinite(value)) currentHeightValue = Math.max(-50, Math.min(50, value | 0));
-  });
-
-  // SAVE (now includes painted tiles + heightfield)
-  uiPanel.panelElement.addEventListener('save-project', (e) => {
-    const { filename } = e.detail || {};
+  // Save / Load
+  uiPanel.panelElement.addEventListener('save-project', () => {
     const data = getProjectData();
     const json = JSON.stringify(data, null, 2);
     const blob = new Blob([json], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = filename || 'titanmap.json';
+    a.download = 'titanmap.json';
     document.body.appendChild(a);
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
   });
 
-  // LOAD
   uiPanel.panelElement.addEventListener('load-project-data', (e) => {
     const { data } = e.detail || {};
     if (!data || !data.grid) { alert('Invalid save file.'); return; }
     applyProjectData(data);
   });
 
-  // Tap/Drag handling
+  // ---------- Pointer / Tap ----------
   const raycaster = new THREE.Raycaster();
   const ndc = new THREE.Vector2();
   const downPos = new THREE.Vector2();
@@ -257,25 +279,25 @@ window.onload = function () {
 
     const { tx, tz } = worldToTile(hit[0].point, gridWidth, gridHeight);
 
-    if (markerMode) { addMarker(tx, tz); return; }
-    if (paintingMode && currentPaintType) { paintTile(tx, tz, currentPaintType); return; }
-
-    // Height tool behavior
+    // Height tool first (it also freezes move)
     if (heightMode) {
-      if (pinMode) {
-        heightTool?.togglePin(tx, tz);
-      } else {
-        heightTool?.setTileHeight(tx, tz, currentHeightValue);
-      }
+      if (pinMode) { togglePin(tx, tz); return; }
+      setTileHeight(tx, tz, desiredHeight);
       return;
     }
+
+    // Marker tool
+    if (markerMode) { addMarker(tx, tz); return; }
+
+    // Painting tool
+    if (paintingMode && currentPaintType) { paintTile(tx, tz, currentPaintType); return; }
 
     if (freezeTapToMove) return;
 
     controller.moveTo(tx, tz);
   });
 
-  // Camera follow + water tick
+  // ---------- Camera follow ----------
   const lastCharPos = new THREE.Vector3();
   const delta = new THREE.Vector3();
 
@@ -288,7 +310,7 @@ window.onload = function () {
       controls.target.add(delta);
     }
 
-    // Tick all water tiles
+    // Tick water tiles
     if (waterTiles.size) {
       for (const w of waterTiles) {
         const u = w.material?.uniforms;
@@ -299,22 +321,22 @@ window.onload = function () {
     controls.update();
   };
 
-  // Boot
+  // ---------- Boot ----------
   addFreezeToggle();
   regenerateWorld(30, 30);
 
-  // -------- Marker helpers --------
+  // =====================================================================
+  // Marker helpers (unchanged)
+  // =====================================================================
   function tileKey(x, y) { return `${x},${y}`; }
 
   function addMarker(tx, tz) {
-    if (tx < 0 || tx >= gridWidth || tz < 0 || tz >= gridHeight) return;
+    if (!inBoundsTile(tx, tz)) return;
     const key = tileKey(tx, tz);
     if (markedTiles.has(key)) return;
 
     const geo = new THREE.PlaneGeometry(1, 1);
-    const mat = new THREE.MeshBasicMaterial({
-      color: 0xff3333, transparent: true, opacity: 0.6, side: THREE.DoubleSide
-    });
+    const mat = new THREE.MeshBasicMaterial({ color: 0xff3333, transparent: true, opacity: 0.6, side: THREE.DoubleSide });
     const m = new THREE.Mesh(geo, mat);
     m.rotation.x = -Math.PI / 2;
     const wp = tileToWorld(tx, tz, gridWidth, gridHeight);
@@ -333,22 +355,22 @@ window.onload = function () {
     markedTiles.clear();
   }
 
-  // -------- Terrain painting --------
+  // =====================================================================
+  // Terrain painting
+  // =====================================================================
   const MATERIALS = {
-    sand:   new THREE.MeshStandardMaterial({ color: 0xD8C6A3, roughness: 0.95, metalness: 0.0, flatShading: true }),
-    dirt:   new THREE.MeshStandardMaterial({ color: 0x6F451F, roughness: 0.95, metalness: 0.0, flatShading: true }),
-    grass:  new THREE.MeshStandardMaterial({ color: 0x2E7D32, roughness: 0.9,  metalness: 0.0, flatShading: true }),
-    stone:  new THREE.MeshStandardMaterial({ color: 0x7D7D7D, roughness: 1.0,  metalness: 0.0, flatShading: true }),
-    gravel: new THREE.MeshStandardMaterial({ color: 0x9A9A9A, roughness: 0.95, metalness: 0.0, flatShading: true }),
-    // water handled specially
+    sand:   new THREE.MeshStandardMaterial({ color: 0xD8C6A3, roughness: 0.95, metalness: 0.0, flatShading: true, transparent: true, opacity: 0.98 }),
+    dirt:   new THREE.MeshStandardMaterial({ color: 0x6F451F, roughness: 0.95, metalness: 0.0, flatShading: true, transparent: true, opacity: 0.98 }),
+    grass:  new THREE.MeshStandardMaterial({ color: 0x2E7D32, roughness: 0.9,  metalness: 0.0, flatShading: true, transparent: true, opacity: 0.98 }),
+    stone:  new THREE.MeshStandardMaterial({ color: 0x7D7D7D, roughness: 1.0,  metalness: 0.0, flatShading: true, transparent: true, opacity: 0.98 }),
+    gravel: new THREE.MeshStandardMaterial({ color: 0x9A9A9A, roughness: 0.95, metalness: 0.0, flatShading: true, transparent: true, opacity: 0.98 }),
   };
 
   function createWaterTile(tx, tz) {
-    // 1×1 tile water using three/examples/jsm/objects/Water
     const geo = new THREE.PlaneGeometry(1, 1);
     const water = new Water(geo, {
-      textureWidth: 256,
-      textureHeight: 256,
+      textureWidth: 512,
+      textureHeight: 512,
       waterNormals,
       sunDirection: dirLight.position.clone().normalize(),
       sunColor: 0xffffff,
@@ -358,11 +380,13 @@ window.onload = function () {
     });
     water.rotation.x = -Math.PI / 2;
     const wp = tileToWorld(tx, tz, gridWidth, gridHeight);
-    water.position.set(wp.x, 0.02, wp.z);
+    // Elevate water slightly above sculpt mesh at that tile center height
+    const centerY = averageTileCornersHeight(tx, tz);
+    water.position.set(wp.x, centerY + 0.02, wp.z);
 
-    // Make ripples "larger" like the example (size ~= wavelength)
     if (water.material.uniforms.size) {
-      water.material.uniforms.size.value = 10.0; // was 0.8
+      // slightly larger ripples for 1×1 — tweakable
+      water.material.uniforms.size.value = 1.0;
     }
 
     water.userData.type = 'water';
@@ -372,43 +396,38 @@ window.onload = function () {
   }
 
   function paintTile(tx, tz, type) {
-    if (tx < 0 || tx >= gridWidth || tz < 0 || tz >= gridHeight) return;
+    if (!inBoundsTile(tx, tz)) return;
     const key = tileKey(tx, tz);
 
-    // Remove/replace existing mesh if present
     const old = paintedTiles.get(key);
     if (old) {
-      if (old.userData?.type === type) return; // same type
+      if (old.userData?.type === type) return;
       if (old.userData?.isWater) waterTiles.delete(old);
-
       terrainGroup.remove(old);
       old.geometry?.dispose?.();
       if (old.userData?.isWater) old.material?.dispose?.();
       paintedTiles.delete(key);
     }
 
-    let mesh;
     if (type === 'water') {
-      mesh = createWaterTile(tx, tz);
+      const mesh = createWaterTile(tx, tz);
       terrainGroup.add(mesh);
       paintedTiles.set(key, mesh);
       waterTiles.add(mesh);
-    } else {
-      const geo = new THREE.PlaneGeometry(1, 1, 1, 1);
-      const mat = MATERIALS[type] || MATERIALS.sand;
-      mesh = new THREE.Mesh(geo, mat);
-      mesh.rotation.x = -Math.PI / 2;
-      const wp = tileToWorld(tx, tz, gridWidth, gridHeight);
-      mesh.position.set(wp.x, 0.015, wp.z);
-      mesh.name = `Tile_${key}_${type}`;
-      mesh.userData.type = type;
-
-      // Apply existing heightfield to this new tile so it fits neighbors
-      heightTool?.refreshTile(tx, tz);
-
-      terrainGroup.add(mesh);
-      paintedTiles.set(key, mesh);
+      return;
     }
+
+    const geo = new THREE.PlaneGeometry(1, 1);
+    const mat = MATERIALS[type] || MATERIALS.sand;
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.rotation.x = -Math.PI / 2;
+    const wp = tileToWorld(tx, tz, gridWidth, gridHeight);
+    const y = averageTileCornersHeight(tx, tz);
+    mesh.position.set(wp.x, y + 0.015, wp.z);
+    mesh.name = `Tile_${key}_${type}`;
+    mesh.userData.type = type;
+    terrainGroup.add(mesh);
+    paintedTiles.set(key, mesh);
   }
 
   function clearAllPainted() {
@@ -421,13 +440,272 @@ window.onload = function () {
     waterTiles.clear();
   }
 
-  // -------- Save/Load helpers --------
+  // =====================================================================
+  // Height sculpting
+  // =====================================================================
+
+  function inBoundsTile(tx, tz) {
+    return tx >= 0 && tx < gridWidth && tz >= 0 && tz < gridHeight;
+  }
+  function inBoundsVertex(vx, vz) {
+    return vx >= 0 && vx <= gridWidth && vz >= 0 && vz <= gridHeight;
+  }
+
+  function setHeightMode(on) {
+    // Turning height mode ON cancels paint & marker and locks Freeze
+    if (on) {
+      if (paintingMode) { paintingMode = false; currentPaintType = null; uiPanel.clearTerrainSelection(); }
+      if (markerMode)   { markerMode = false;   uiPanel.setMarkerToggle(false); }
+      heightMode = true;
+      setFreeze(true, true);
+    } else {
+      heightMode = false;
+      pinMode = false;
+      // Clear green pins visual (UI says: turning the 1st toggle off removes highlight)
+      clearAllPinsVisual();
+      setFreeze(false, false);
+    }
+    uiPanel.reflectHeightUI(heightMode, pinMode, desiredHeight);
+  }
+
+  function togglePin(tx, tz) {
+    if (!inBoundsTile(tx, tz)) return;
+    pinTiles[tx][tz] = !pinTiles[tx][tz];
+    // visual: green overlay quad
+    setPinVisual(tx, tz, pinTiles[tx][tz]);
+  }
+
+  // Pin visuals are simple green overlay planes (similar to marker)
+  const pinVisuals = new Map(); // "tx,tz" -> Mesh
+  function setPinVisual(tx, tz, on) {
+    const key = tileKey(tx, tz);
+    if (on) {
+      if (pinVisuals.has(key)) return;
+      const geo = new THREE.PlaneGeometry(1, 1);
+      const mat = new THREE.MeshBasicMaterial({ color: 0x21c46d, transparent: true, opacity: 0.7, side: THREE.DoubleSide });
+      const m = new THREE.Mesh(geo, mat);
+      m.rotation.x = -Math.PI / 2;
+      const wp = tileToWorld(tx, tz, gridWidth, gridHeight);
+      const y = averageTileCornersHeight(tx, tz);
+      m.position.set(wp.x, y + 0.03, wp.z);
+      m.name = `Pin_${key}`;
+      scene.add(m);
+      pinVisuals.set(key, m);
+    } else {
+      const m = pinVisuals.get(key);
+      if (m) {
+        scene.remove(m);
+        m.geometry?.dispose?.();
+        m.material?.dispose?.();
+        pinVisuals.delete(key);
+      }
+    }
+  }
+  function clearAllPinsVisual() {
+    for (const [, m] of pinVisuals) {
+      scene.remove(m);
+      m.geometry?.dispose?.();
+      m.material?.dispose?.();
+    }
+    pinVisuals.clear();
+    // Also clear the logical pins (requirement: turning 1st toggle off removes highlight)
+    for (let x = 0; x < gridWidth; x++) for (let z = 0; z < gridHeight; z++) pinTiles[x][z] = false;
+  }
+
+  function averageTileCornersHeight(tx, tz) {
+    const h00 = heightGrid[tx][tz];
+    const h10 = heightGrid[tx + 1][tz];
+    const h01 = heightGrid[tx][tz + 1];
+    const h11 = heightGrid[tx + 1][tz + 1];
+    return (h00 + h10 + h01 + h11) * 0.25;
+  }
+
+  // Set the four corners of a tile to a height, respecting pinned neighbors
+  function setTileHeight(tx, tz, h) {
+    if (!inBoundsTile(tx, tz)) return;
+
+    // If this tile is pinned, we don't edit it (it's an anchor).
+    if (pinTiles[tx][tz]) return;
+
+    // Grab desired new corner heights
+    const newH = clamp(h, HEIGHT_MIN, HEIGHT_MAX);
+
+    // For each of the 4 corners of the tile, try to set height unless that corner is "owned"
+    // by an adjacent pinned tile. Ownership rule: if any of the tiles sharing that corner
+    // is pinned, that corner is locked to its current height.
+    const corners = [
+      { vx: tx,     vz: tz     }, // bottom-left
+      { vx: tx + 1, vz: tz     }, // bottom-right
+      { vx: tx,     vz: tz + 1 }, // top-left
+      { vx: tx + 1, vz: tz + 1 }  // top-right
+    ];
+
+    for (const c of corners) {
+      if (!inBoundsVertex(c.vx, c.vz)) continue;
+      if (cornerLockedByPins(c.vx, c.vz)) continue;
+      heightGrid[c.vx][c.vz] = newH;
+    }
+
+    applyHeightGridToMesh();
+    rebuildCliffsAround(tx, tz);
+
+    // Re-seat any overlays (painted tiles or pins at these tiles and neighbors)
+    refreshOverlayHeightsAround(tx, tz);
+  }
+
+  function cornerLockedByPins(vx, vz) {
+    // Corner is shared by up to 4 tiles:
+    // tiles: (vx-1,vz-1), (vx-1,vz), (vx,vz-1), (vx,vz)
+    const tilesToCheck = [
+      [vx - 1, vz - 1],
+      [vx - 1, vz],
+      [vx, vz - 1],
+      [vx, vz]
+    ];
+    for (const [tx, tz] of tilesToCheck) {
+      if (inBoundsTile(tx, tz) && pinTiles[tx][tz]) return true;
+    }
+    return false;
+  }
+
+  function applyHeightGridToMesh() {
+    // terrainMesh geometry has (gridWidth+1)*(gridHeight+1) vertices laid out in x (width) then z (height)
+    const geo = terrainMesh.geometry;
+    const pos = geo.attributes.position;
+    // PlaneGeometry grid is centered: x ∈ [-w/2, +w/2], z ∈ [-h/2, +h/2]
+    // Our heightGrid indices match the segment grid ordering of PlaneGeometry.
+    let i = 0;
+    for (let vz = 0; vz <= gridHeight; vz++) {
+      for (let vx = 0; vx <= gridWidth; vx++) {
+        // x,y,z of vertex i
+        // x, z stay as created by the geometry; we only update y (index i*3+1)
+        const y = heightGrid[vx][vz];
+        pos.setY(i, y);
+        i++;
+      }
+    }
+    pos.needsUpdate = true;
+    geo.computeVertexNormals();
+  }
+
+  // ----- Cliffs (vertical walls on discontinuities next to pinned tiles) -----
+  function rebuildCliffsAll() {
+    // Clear and rebuild along all interior edges where an edge separates at least one pinned tile
+    cliffGroup.clear();
+    // For each shared horizontal edge (between (tx,tz) and (tx+1,tz)), build if needed
+    for (let tz = 0; tz < gridHeight; tz++) {
+      for (let tx = 0; tx < gridWidth - 1; tx++) {
+        addCliffIfNeeded(tx, tz, tx + 1, tz, 'vertical'); // edge along x between tile (tx,tz) and (tx+1,tz)
+      }
+    }
+    // For each shared vertical edge (between (tx,tz) and (tx,tz+1))
+    for (let tz = 0; tz < gridHeight - 1; tz++) {
+      for (let tx = 0; tx < gridWidth; tx++) {
+        addCliffIfNeeded(tx, tz, tx, tz + 1, 'horizontal'); // edge along z
+      }
+    }
+  }
+
+  function rebuildCliffsAround(tx, tz) {
+    // Rebuild a 3×3 neighborhood edges around tile for performance
+    const minx = Math.max(0, tx - 1), maxx = Math.min(gridWidth - 1, tx + 1);
+    const minz = Math.max(0, tz - 1), maxz = Math.min(gridHeight - 1, tz + 1);
+
+    // Remove all cliffs (simpler & safe on small maps); if perf needed, track by edge key
+    cliffGroup.clear();
+
+    // Re-add edges locally (plus neighbors’ edges)
+    for (let z = 0; z < gridHeight; z++) {
+      for (let x = 0; x < gridWidth - 1; x++) addCliffIfNeeded(x, z, x + 1, z, 'vertical');
+    }
+    for (let z = 0; z < gridHeight - 1; z++) {
+      for (let x = 0; x < gridWidth; x++) addCliffIfNeeded(x, z, x, z + 1, 'horizontal');
+    }
+  }
+
+  function addCliffIfNeeded(aTx, aTz, bTx, bTz, edgeKind /* 'vertical'|'horizontal' */) {
+    // Only build a wall if at least one of the two tiles is pinned, AND their shared edge heights differ.
+    const aPinned = pinTiles[aTx][aTz];
+    const bPinned = pinTiles[bTx][bTz];
+    if (!(aPinned || bPinned)) return;
+
+    // Shared edge corner heights:
+    // vertical edge ⇒ tiles share vertices (bTx,bTz) & (bTx, bTz+1) if edgeKind = 'vertical'
+    // horizontal edge ⇒ share (bTx,bTz) & (bTx+1,bTz)
+    let v0, v1; // [vx,vz]
+    if (edgeKind === 'vertical') {
+      // edge between (aTx,aTz) and (bTx,bTz) where bTx = aTx+1
+      v0 = [bTx, bTz];
+      v1 = [bTx, bTz + 1];
+    } else {
+      // horizontal edge: bTz = aTz+1
+      v0 = [bTx, bTz];
+      v1 = [bTx + 1, bTz];
+    }
+    const h0 = heightGrid[v0[0]][v0[1]];
+    const h1 = heightGrid[v1[0]][v1[1]];
+    const dh = h1 - h0;
+    if (Math.abs(dh) < 1e-5) return;
+
+    // Build a vertical rectangular quad spanning from min(h0,h1) to max(...) along the shared edge.
+    // Wall thickness: very thin; we orient a PlaneGeometry accordingly.
+    const height = Math.abs(dh);
+    const midH = Math.min(h0, h1) + height * 0.5;
+
+    // Edge midpoint position in world:
+    const aCenter = tileToWorld(aTx, aTz, gridWidth, gridHeight);
+    const bCenter = tileToWorld(bTx, bTz, gridWidth, gridHeight);
+    const mid = new THREE.Vector3().addVectors(aCenter, bCenter).multiplyScalar(0.5);
+
+    // Length along edge is 1m (tile size).
+    const geom = new THREE.PlaneGeometry(1, height);
+    const mat = new THREE.MeshStandardMaterial({
+      color: 0x1f8a4e, // greenish (as in your screenshot walls)
+      roughness: 0.95,
+      metalness: 0.0,
+      side: THREE.DoubleSide,
+      flatShading: true
+    });
+    const wall = new THREE.Mesh(geom, mat);
+    wall.position.set(mid.x, midH, mid.z);
+    if (edgeKind === 'vertical') {
+      // edge runs along Z ⇒ rotate wall so its plane is aligned YZ (normal ±X)
+      wall.rotation.y = Math.PI / 2;
+    } else {
+      // edge runs along X ⇒ plane aligned YX (normal ±Z)
+      // default plane faces +Z, fine
+    }
+    wall.name = `Cliff_${aTx},${aTz}_${bTx},${bTz}`;
+    cliffGroup.add(wall);
+  }
+
+  function refreshOverlayHeightsAround(tx, tz) {
+    // Re-seat painted tiles & pin visuals nearby to float above terrain
+    const neighbors = [
+      [tx, tz], [tx - 1, tz], [tx + 1, tz], [tx, tz - 1], [tx, tz + 1],
+      [tx - 1, tz - 1], [tx - 1, tz + 1], [tx + 1, tz - 1], [tx + 1, tz + 1]
+    ];
+    for (const [x, z] of neighbors) {
+      if (!inBoundsTile(x, z)) continue;
+      const key = tileKey(x, z);
+      const y = averageTileCornersHeight(x, z);
+
+      const painted = paintedTiles.get(key);
+      if (painted) painted.position.y = (painted.userData?.isWater ? y + 0.02 : y + 0.015);
+
+      const pinVis = pinVisuals.get(key);
+      if (pinVis) pinVis.position.y = y + 0.03;
+    }
+  }
+
+  // =====================================================================
+  // Save / Load (now includes heightGrid & pinTiles)
+  // =====================================================================
   function getProjectData() {
     const charTx = controller.tilePos?.tx ?? Math.floor(gridWidth / 2);
     const charTz = controller.tilePos?.tz ?? Math.floor(gridHeight / 2);
     const markers = [...markedTiles.keys()].map(k => k.split(',').map(Number));
 
-    // Serialize painted tiles as [x, y, type]
     const tiles = [];
     for (const [key, mesh] of paintedTiles) {
       const [xStr, yStr] = key.split(',');
@@ -438,14 +716,19 @@ window.onload = function () {
       }
     }
 
-    // Height save: corner heightfield + pins + current value
-    const height = {
-      value: currentHeightValue,
-      pins: [...(heightTool?.pinned ?? [])].map(k => k.split(',').map(Number)),
-      width: gridWidth,
-      height: gridHeight,
-      field: Array.from(heightTool?.heights ?? []) // Float32Array -> plain array
-    };
+    // Flatten heightGrid and pinTiles
+    const heights = [];
+    for (let vz = 0; vz <= gridHeight; vz++) {
+      const row = [];
+      for (let vx = 0; vx <= gridWidth; vx++) row.push(Number(heightGrid[vx][vz] || 0));
+      heights.push(row);
+    }
+    const pins = [];
+    for (let tz = 0; tz < gridHeight; tz++) {
+      const row = [];
+      for (let tx = 0; tx < gridWidth; tx++) row.push(!!pinTiles[tx][tz]);
+      pins.push(row);
+    }
 
     return {
       version: 8,
@@ -462,11 +745,15 @@ window.onload = function () {
       },
       markers,
       terrain: {
-        paintingMode: false, // always OFF on save/load
+        paintingMode: false,
         selected: null,
         tiles
       },
-      height
+      height: {
+        step: HEIGHT_STEP,
+        pinTiles: pins,
+        heightGrid: heights
+      }
     };
   }
 
@@ -482,10 +769,9 @@ window.onload = function () {
     // Modes OFF after load
     paintingMode = false; currentPaintType = null; uiPanel.clearTerrainSelection();
     markerMode = false;  uiPanel.setMarkerToggle(false);
-    heightMode = false;  pinMode = false;
-    heightTool?.removeAllPins();
+    setHeightMode(false);
 
-    // Restore markers
+    // Markers
     clearAllMarkers();
     if (Array.isArray(data.markers)) {
       for (const pair of data.markers) {
@@ -497,7 +783,7 @@ window.onload = function () {
       controller.applyNonWalkables([...markedTiles.keys()]);
     }
 
-    // Restore painted tiles
+    // Painted tiles
     clearAllPainted();
     const tiles = data.terrain?.tiles;
     if (Array.isArray(tiles)) {
@@ -505,41 +791,36 @@ window.onload = function () {
         if (!Array.isArray(t) || t.length < 3) continue;
         const px = Number(t[0]), pz = Number(t[1]);
         const type = String(t[2]);
-        if (Number.isFinite(px) && Number.isFinite(pz)) {
-          paintTile(px, pz, type);
-        }
+        if (Number.isFinite(px) && Number.isFinite(pz)) paintTile(px, pz, type);
       }
     }
 
-    // Restore heightfield if present and size matches
-    if (data.height && Array.isArray(data.height.field)) {
-      const savedW = Number(data.height.width) || w;
-      const savedH = Number(data.height.height) || h;
-      if (savedW === w && savedH === h) {
-        const src = data.height.field;
-        const dst = heightTool.heights;
-        const n = Math.min(dst.length, src.length);
-        for (let i = 0; i < n; i++) dst[i] = Number(src[i]) || 0;
-        // restore pins (overlay will show after you enter height mode again; we don't toggle it on load)
-        if (Array.isArray(data.height.pins)) {
-          heightTool.removeAllPins(); // clears and overlay meshes
-          for (const pair of data.height.pins) {
-            if (!Array.isArray(pair) || pair.length < 2) continue;
-            const px = Number(pair[0]), pz = Number(pair[1]);
-            if (Number.isFinite(px) && Number.isFinite(pz)) {
-              // don't create overlays now (stay hidden after load) — keep data only
-              heightTool.pinned.add(tileKey(px, pz));
-            }
-          }
+    // Heights & pins
+    if (Array.isArray(data.height?.heightGrid)) {
+      const hg = data.height.heightGrid;
+      for (let vz = 0; vz <= gridHeight && vz < hg.length; vz++) {
+        for (let vx = 0; vx <= gridWidth && vx < hg[vz].length; vx++) {
+          const val = Number(hg[vz][vx]);
+          heightGrid[vx][vz] = Number.isFinite(val) ? val : 0;
         }
-        currentHeightValue = Number(data.height.value) || 0;
-        // re-apply heights to any painted tiles
-        heightTool.refreshAllPainted();
+      }
+      applyHeightGridToMesh();
+    }
+    if (Array.isArray(data.height?.pinTiles)) {
+      const pt = data.height.pinTiles;
+      for (let tz = 0; tz < gridHeight && tz < pt.length; tz++) {
+        for (let tx = 0; tx < gridWidth && tx < pt[tz].length; tx++) {
+          pinTiles[tx][tz] = !!pt[tz][tx];
+          setPinVisual(tx, tz, pinTiles[tx][tz]);
+        }
       }
     }
+    rebuildCliffsAll();
+    // Reseat overlays
+    for (let z = 0; z < gridHeight; z++) for (let x = 0; x < gridWidth; x++) refreshOverlayHeightsAround(x, z);
 
-    // Restore freeze (kept OFF unless explicitly saved ON)
-    setFreeze(!!data.settings?.freezeTapToMove, /*disableUI*/ false);
+    // Freeze
+    setFreeze(!!data.settings?.freezeTapToMove, false);
 
     // Camera
     if (Array.isArray(data.camera?.position) && Array.isArray(data.camera?.target)) {
@@ -558,35 +839,25 @@ window.onload = function () {
     }
   }
 
-  // -------- Freeze HUD (top-left) --------
+  // =====================================================================
+  // Freeze HUD
+  // =====================================================================
   function addFreezeToggle() {
     const style = document.createElement('style');
     style.textContent = `
-      .hud-freeze {
-        position: fixed; top: 12px; left: 12px; z-index: 20;
-        display: flex; align-items: center; gap: 8px;
-        background: rgba(30,32,37,0.85);
-        color: #e8e8ea; padding: 8px 10px;
-        border: 1px solid rgba(255,255,255,0.1);
-        border-radius: 6px; backdrop-filter: blur(8px);
-        -webkit-backdrop-filter: blur(8px);
-        font: 600 12px/1.2 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Inter,sans-serif;
-      }
-      .switch { position: relative; display: inline-block; width: 44px; height: 24px; }
-      .switch input { opacity: 0; width: 0; height: 0; }
-      .slider {
-        position: absolute; cursor: pointer; inset: 0;
-        background: #3a3d46; transition: .2s; border-radius: 999px;
-        box-shadow: inset 0 0 0 1px rgba(255,255,255,0.1);
-      }
-      .slider:before {
-        position: absolute; content: "";
-        height: 18px; width: 18px; left: 3px; top: 3px;
-        background: #fff; border-radius: 50%; transition: .2s;
-      }
-      input:checked + .slider { background: #00aaff; }
+      .hud-freeze { position: fixed; top: 12px; left: 12px; z-index: 20;
+        display:flex; align-items:center; gap:8px; background: rgba(30,32,37,0.85);
+        color:#e8e8ea; padding:8px 10px; border:1px solid rgba(255,255,255,0.1);
+        border-radius:6px; backdrop-filter:blur(8px); -webkit-backdrop-filter: blur(8px);
+        font:600 12px/1.2 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Inter,sans-serif; }
+      .switch { position:relative; display:inline-block; width:44px; height:24px; }
+      .switch input { opacity:0; width:0; height:0; }
+      .slider { position:absolute; cursor:pointer; inset:0; background:#3a3d46; transition:.2s; border-radius:999px;
+        box-shadow: inset 0 0 0 1px rgba(255,255,255,0.1); }
+      .slider:before { position:absolute; content:""; height:18px; width:18px; left:3px; top:3px; background:#fff; border-radius:50%; transition:.2s; }
+      input:checked + .slider { background:#00aaff; }
       input:checked + .slider:before { transform: translateX(20px); }
-      input:disabled + .slider { filter: grayscale(0.3); opacity: 0.65; cursor: not-allowed; }
+      input:disabled + .slider { filter: grayscale(0.3); opacity:0.65; cursor:not-allowed; }
     `;
     document.head.appendChild(style);
 
@@ -603,7 +874,7 @@ window.onload = function () {
 
     freezeCheckboxEl = hud.querySelector('#freezeMoveToggle');
     freezeCheckboxEl.addEventListener('change', () => {
-      // While marking, painting, or height editing, freeze is locked ON
+      // Locked ON while Marker, Paint, or Height mode is active
       if (markerMode || paintingMode || heightMode) {
         freezeCheckboxEl.checked = true;
         return;
@@ -622,4 +893,7 @@ window.onload = function () {
         : 'Freeze tap-to-move';
     }
   }
+
+  // Utils
+  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
 };
