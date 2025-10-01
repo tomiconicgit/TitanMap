@@ -7,13 +7,10 @@ export default class Viewport {
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    
     document.body.appendChild(this.renderer.domElement);
     
-    // An empty function hook to be assigned later
-    this.onBeforeRender = () => {}; 
-    
-    // Scene and camera will be assigned later
+    this.clock = new THREE.Clock();
+    this.onBeforeRender = () => {};
     this.scene = null;
     this.camera = null;
     
@@ -27,7 +24,8 @@ export default class Viewport {
     
     this.renderer.setAnimationLoop(() => {
       if (this.scene && this.camera) {
-        this.onBeforeRender(); // Call the update hook
+        const deltaTime = this.clock.getDelta();
+        this.onBeforeRender(deltaTime);
         this.renderer.render(this.scene, this.camera);
       }
     });
