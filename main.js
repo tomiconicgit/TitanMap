@@ -53,12 +53,14 @@ window.onload = function () {
   viewport.camera = camera;
 
   // -------- Water normals (LOCAL file) --------
-  // Place at ./textures/waternormals.jpg, or change this path if you put it elsewhere.
   const WATER_NORMALS_URL = './textures/waternormals.jpg';
   const texLoader = new THREE.TextureLoader();
   const waterNormals = texLoader.load(WATER_NORMALS_URL, (tex) => {
     tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   });
+
+  // Global time so ALL water tiles animate in sync
+  let waterGlobalTime = 0;
 
   // World generation
   function regenerateWorld(width, height) {
@@ -148,7 +150,6 @@ window.onload = function () {
   uiPanel.panelElement.addEventListener('marker-toggle-request', (e) => {
     const { wantOn } = e.detail || {};
     if (wantOn) {
-      // If painting, stop it first
       if (paintingMode) {
         paintingMode = false;
         currentPaintType = null;
@@ -227,11 +228,12 @@ window.onload = function () {
       controls.target.add(delta);
     }
 
-    // Tick all water tiles (waves animation)
+    // Advance ONE global time, then apply to all water tiles
+    waterGlobalTime += dt;
     if (waterTiles.size) {
       for (const w of waterTiles) {
         const u = w.material?.uniforms;
-        if (u && u.time) u.time.value += dt;
+        if (u && u.time) u.time.value = waterGlobalTime;
       }
     }
 
@@ -283,27 +285,47 @@ window.onload = function () {
   };
 
   function createWaterTile(tx, tz) {
-    // 1×1 tile water using three/examples/jsm/objects/Water
+    // Build a 1×1 plane BUT give it world-space UVs so neighbors are seamless
     const geo = new THREE.PlaneGeometry(1, 1);
+
+    // Compute world edges of this tile
+    const center = tileToWorld(tx, tz, gridWidth, gridHeight);
+    const x0 = center.x - 0.5, x1 = center.x + 0.5;
+    const z0 = center.z - 0.5, z1 = center.z + 0.5;
+
+    // Override UVs with world-space mapping (so textures ripple continuously)
+    // (Keep a scale of 1.0 = one texture repeat per world unit; tweak if you like)
+    const UV_SCALE = 1.0;
+    const uvs = new Float32Array([
+      x0 * UV_SCALE, z1 * UV_SCALE,
+      x1 * UV_SCALE, z1 * UV_SCALE,
+      x0 * UV_SCALE, z0 * UV_SCALE,
+      x1 * UV_SCALE, z0 * UV_SCALE
+    ]);
+    geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+
     const water = new Water(geo, {
       textureWidth: 512,
       textureHeight: 512,
-      waterNormals,
+      waterNormals,                               // local texture, repeat-wrapped
       sunDirection: dirLight.position.clone().normalize(),
       sunColor: 0xffffff,
       waterColor: 0x2066cc,
-      distortionScale: 3.7, // like the example
+      distortionScale: 3.7,                       // strong distortion like the demo
       fog: !!scene.fog
     });
 
-    // match the ocean demo look
+    // Match the ocean demo look (bigger waves across the whole body)
     if (water.material.uniforms.size) {
-      water.material.uniforms.size.value = 10; // stronger, broader ripples
+      water.material.uniforms.size.value = 10;    // key change for “big” ripples
     }
-    // ensure rotation/placement
+    // Start with the global time so new tiles sync immediately
+    if (water.material.uniforms.time) {
+      water.material.uniforms.time.value = waterGlobalTime;
+    }
+
     water.rotation.x = -Math.PI / 2;
-    const wp = tileToWorld(tx, tz, gridWidth, gridHeight);
-    water.position.set(wp.x, 0.02, wp.z);
+    water.position.set(center.x, 0.02, center.z);
 
     water.userData.type = 'water';
     water.userData.isWater = true;
@@ -375,7 +397,7 @@ window.onload = function () {
     }
 
     return {
-      version: 8,
+      version: 9,
       timestamp: Date.now(),
       grid: { width: gridWidth, height: gridHeight },
       character: { tx: charTx, tz: charTz },
