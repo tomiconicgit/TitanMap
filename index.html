@@ -3,7 +3,6 @@
 <head>
     <meta charset="utf-8" />
     <title>TitanMap</title>
-
     <meta name="viewport" 
           content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -11,12 +10,6 @@
     <meta name="theme-color" content="#111318" />
 
     <style>
-      :root {
-        /* Define safe area inset for notches/dynamic islands */
-        --safe-top: env(safe-area-inset-top);
-        --safe-bottom: env(safe-area-inset-bottom);
-      }
-
       html, body {
         margin: 0;
         padding: 0;
@@ -24,41 +17,22 @@
         width: 100%;
         overflow: hidden;
         background-color: #111318;
-        color: #e8e8ea;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-        -webkit-tap-highlight-color: transparent; /* Disable tap highlight on iOS */
       }
-
-      body {
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        text-align: center;
-      }
-
-      .container {
-        padding-top: var(--safe-top);
-        padding-bottom: var(--safe-bottom);
-      }
-      
-      h1 {
-        font-weight: 600;
-        font-size: 24px;
-        color: #fff;
-      }
-
-      p {
-        color: #888;
-        margin-top: 8px;
+      canvas {
+        display: block; /* Removes bottom space under the canvas */
       }
     </style>
+
+    <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.168.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.168.0/examples/jsm/"
+      }
+    }
+    </script>
 </head>
 <body>
-
-  <div class="container">
-    <h1>TitanMap</h1>
-    <p>Your PWA is ready to go.</p>
-  </div>
-
+  <script type="module" src="./main.js"></script>
 </body>
 </html>
