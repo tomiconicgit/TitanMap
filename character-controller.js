@@ -15,10 +15,13 @@ export class CharacterController {
 
     this.PF = (typeof window !== 'undefined') ? window.PF : null;
     if (this.PF) {
-      this.pfGrid = new this.PF.Grid(gridWidth, gridHeight);
+      // IMPORTANT: this pathfinding build expects an object, not (w, h)
+      this.pfGrid = new this.PF.Grid({ width: gridWidth, height: gridHeight });
       this.finder = new this.PF.AStarFinder({
         allowDiagonal: true,
-        dontCrossCorners: true
+        dontCrossCorners: true,
+        heuristic: this.PF.Heuristic.octile,
+        weight: 1
       });
     }
 
@@ -29,11 +32,14 @@ export class CharacterController {
     this.gridWidth = width;
     this.gridHeight = height;
     if (this.PF) {
-      this.pfGrid = new this.PF.Grid(width, height);
+      // IMPORTANT: rebuild with the object form here too
+      this.pfGrid = new this.PF.Grid({ width, height });
       if (!this.finder) {
         this.finder = new this.PF.AStarFinder({
           allowDiagonal: true,
-          dontCrossCorners: true
+          dontCrossCorners: true,
+          heuristic: this.PF.Heuristic.octile,
+          weight: 1
         });
       }
     }
@@ -54,7 +60,8 @@ export class CharacterController {
 
     let path = null;
     if (this.PF && this.finder && this.pfGrid) {
-      const gridClone = this.pfGrid.clone(); // IMPORTANT: always clone before searching
+      // always clone before searching
+      const gridClone = this.pfGrid.clone();
       path = this.finder.findPath(this.tilePos.tx, this.tilePos.tz, tx, tz, gridClone);
     }
 
