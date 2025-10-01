@@ -4,7 +4,7 @@ import { GRID_SIZE, TILE_SIZE } from './grid-utils.js';
 
 /**
  * Orbit-chase camera that always looks at a target (your red circle)
- * with a fixed orbit distance/angle and clamps the look-at inside the grid.
+ * and clamps the look-at inside the grid bounds.
  */
 export default class CameraRig {
   static main = null;
@@ -17,7 +17,6 @@ export default class CameraRig {
 
   constructor() {
     // World bounds for a center-origin grid:
-    // grid spans [-W/2 .. +W/2] in both X and Z
     const worldSpanX = GRID_SIZE * TILE_SIZE;
     const worldSpanZ = GRID_SIZE * TILE_SIZE;
 
@@ -50,18 +49,18 @@ export default class CameraRig {
   }
 
   setTarget(target) { this.target = target; this.update(); }
-  notifyUserRotated() {} // (hook for gestures if you add them later)
+  notifyUserRotated() {} // placeholder
 
   _heightFromDistance() {
     const d = THREE.MathUtils.clamp(this.orbitDistance, this.minDistance, this.maxDistance);
     const t = (d - this.minDistance) / (this.maxDistance - this.minDistance);
     return THREE.MathUtils.lerp(this.minHeight, this.maxHeight, t);
-  }
+    }
 
   update() {
     const tp = this.target?.position || new THREE.Vector3();
 
-    // Clamp ONLY the look-at point so the rig doesn't fight camera stability
+    // Clamp ONLY the look-at point
     const lookX = THREE.MathUtils.clamp(tp.x, this.worldMinX, this.worldMaxX);
     const lookZ = THREE.MathUtils.clamp(tp.z, this.worldMinZ, this.worldMaxZ);
 
