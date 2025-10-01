@@ -110,7 +110,6 @@ window.onload = function () {
       uiPanel.clearTerrainSelection();
       setFreeze(false, /*disableUI*/ false);
     } else {
-      // Even if not painting, make sure UI shows nothing selected
       uiPanel.clearTerrainSelection();
     }
   });
@@ -121,7 +120,7 @@ window.onload = function () {
     if (!type) return;
 
     if (active) {
-      // If marker mode is on, turn it off first (spec synergy)
+      // If marker mode is on, turn it off first
       if (markerMode) {
         markerMode = false;
         uiPanel.setMarkerToggle(false);
@@ -156,7 +155,7 @@ window.onload = function () {
     }
   });
 
-  // SAVE (includes markers; painting data not serialized yet)
+  // SAVE (now includes painted tiles)
   uiPanel.panelElement.addEventListener('save-project', (e) => {
     const { filename } = e.detail || {};
     const data = getProjectData();
@@ -274,6 +273,7 @@ window.onload = function () {
     const old = paintedTiles.get(key);
     if (old) {
       old.material = MATERIALS[type];
+      old.userData.type = type; // keep type updated for save
       return;
     }
 
@@ -284,6 +284,7 @@ window.onload = function () {
     const wp = tileToWorld(tx, tz, gridWidth, gridHeight);
     mesh.position.set(wp.x, 0.015, wp.z); // slightly above grid
     mesh.name = `Tile_${key}_${type}`;
+    mesh.userData.type = type; // record type for save
     terrainGroup.add(mesh);
     paintedTiles.set(key, mesh);
   }
@@ -292,7 +293,7 @@ window.onload = function () {
     for (const [, mesh] of paintedTiles) {
       terrainGroup.remove(mesh);
       mesh.geometry?.dispose?.();
-      // materials are shared; don't dispose shared MATERIALS here
+      // materials are shared; do not dispose shared MATERIALS
     }
     paintedTiles.clear();
   }
@@ -303,8 +304,19 @@ window.onload = function () {
     const charTz = controller.tilePos?.tz ?? Math.floor(gridHeight / 2);
     const markers = [...markedTiles.keys()].map(k => k.split(',').map(Number));
 
+    // Serialize painted tiles as [x, y, type]
+    const tiles = [];
+    for (const [key, mesh] of paintedTiles) {
+      const [xStr, yStr] = key.split(',');
+      const tx = Number(xStr), tz = Number(yStr);
+      const t = mesh?.userData?.type;
+      if (Number.isFinite(tx) && Number.isFinite(tz) && typeof t === 'string') {
+        tiles.push([tx, tz, t]);
+      }
+    }
+
     return {
-      version: 5,
+      version: 6,
       timestamp: Date.now(),
       grid: { width: gridWidth, height: gridHeight },
       character: { tx: charTx, tz: charTz },
@@ -317,8 +329,11 @@ window.onload = function () {
         markerMode: !!markerMode
       },
       markers,
-      terrain: { paintingMode: !!paintingMode, selected: currentPaintType }
-      // (Painted tiles can be serialized later if you want)
+      terrain: {
+        paintingMode: false,          // always off on save/load for safety
+        selected: null,               // none selected after load
+        tiles                            // <—— painted tiles data
+      }
     };
   }
 
@@ -331,9 +346,11 @@ window.onload = function () {
     const tz = Math.max(0, Math.min(h - 1, Number(data.character?.tz) ?? Math.floor(h / 2)));
     controller.resetTo(tx, tz);
 
-    // After load, painting/marker modes default off for safety
+    // Modes OFF after load
     paintingMode = false; currentPaintType = null; uiPanel.clearTerrainSelection();
     markerMode = false;  uiPanel.setMarkerToggle(false);
+
+    // Restore markers
     clearAllMarkers();
     if (Array.isArray(data.markers)) {
       for (const pair of data.markers) {
@@ -345,8 +362,24 @@ window.onload = function () {
       controller.applyNonWalkables([...markedTiles.keys()]);
     }
 
+    // Restore painted tiles
+    clearAllPainted();
+    const tiles = data.terrain?.tiles;
+    if (Array.isArray(tiles)) {
+      for (const t of tiles) {
+        if (!Array.isArray(t) || t.length < 3) continue;
+        const px = Number(t[0]), pz = Number(t[1]);
+        const type = String(t[2]);
+        if (Number.isFinite(px) && Number.isFinite(pz) && MATERIALS[type]) {
+          paintTile(px, pz, type);
+        }
+      }
+    }
+
+    // Restore (or default) freeze
     setFreeze(!!data.settings?.freezeTapToMove, /*disableUI*/ false);
 
+    // Camera
     if (Array.isArray(data.camera?.position) && Array.isArray(data.camera?.target)) {
       const [cx, cy, cz] = data.camera.position;
       const [txx, tyy, tzz] = data.camera.target;
