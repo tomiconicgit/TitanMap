@@ -1,33 +1,35 @@
 import * as THREE from 'three';
 
 export default class Viewport {
-  constructor(scene, camera) {
-    // 1. Create the renderer
+  constructor() {
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setPixelRatio(window.devicePixelRatio);
     this.renderer.setSize(window.innerWidth, window.innerHeight);
-
-    // Basic quality settings
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     
-    // 2. Add the canvas to the page
     document.body.appendChild(this.renderer.domElement);
     
-    // 3. Store scene and camera
-    this.scene = scene;
-    this.camera = camera;
+    // An empty function hook to be assigned later
+    this.onBeforeRender = () => {}; 
     
-    // 4. Handle window resizing
+    // Scene and camera will be assigned later
+    this.scene = null;
+    this.camera = null;
+    
     window.addEventListener('resize', () => {
-      this.camera.aspect = window.innerWidth / window.innerHeight;
-      this.camera.updateProjectionMatrix();
+      if (this.camera) {
+        this.camera.aspect = window.innerWidth / window.innerHeight;
+        this.camera.updateProjectionMatrix();
+      }
       this.renderer.setSize(window.innerWidth, window.innerHeight);
     });
     
-    // 5. Start the render loop
     this.renderer.setAnimationLoop(() => {
-      this.renderer.render(this.scene, this.camera);
+      if (this.scene && this.camera) {
+        this.onBeforeRender(); // Call the update hook
+        this.renderer.render(this.scene, this.camera);
+      }
     });
   }
 }
