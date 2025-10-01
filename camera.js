@@ -1,25 +1,85 @@
+// file: camera.js
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GRID_SIZE, TILE_SIZE } from './grid-utils.js';
 
-export function createCamera(canvas) {
-  const camera = new THREE.PerspectiveCamera(
-    60,
-    window.innerWidth / window.innerHeight,
-    0.1,
-    1000 
-  );
-  
-  camera.position.set(2, 6, 8);
+/**
+ * Orbit-chase camera that always looks at a target (your red circle)
+ * with a fixed orbit distance/angle and clamps the look-at inside the grid.
+ */
+export default class CameraRig {
+  static main = null;
 
-  const controls = new OrbitControls(camera, canvas);
-  
-  controls.enableDamping = true;
-  controls.dampingFactor = 0.05;
-  controls.minDistance = 3;
-  controls.maxDistance = 50;
-  controls.maxPolarAngle = Math.PI / 2.1;
-  
-  controls.target.set(0, 0, 0);
+  static create() {
+    if (CameraRig.main) return CameraRig.main;
+    CameraRig.main = new CameraRig();
+    return CameraRig.main;
+  }
 
-  return { camera, controls };
+  constructor() {
+    // World bounds for a center-origin grid:
+    // grid spans [-W/2 .. +W/2] in both X and Z
+    const worldSpanX = GRID_SIZE * TILE_SIZE;
+    const worldSpanZ = GRID_SIZE * TILE_SIZE;
+
+    this.worldMinX = -worldSpanX * 0.5;
+    this.worldMaxX =  worldSpanX * 0.5;
+    this.worldMinZ = -worldSpanZ * 0.5;
+    this.worldMaxZ =  worldSpanZ * 0.5;
+
+    this.threeCamera = new THREE.PerspectiveCamera(
+      60,
+      window.innerWidth / window.innerHeight,
+      0.01,
+      Math.max(worldSpanX, worldSpanZ) * 50
+    );
+
+    // orbit params
+    this.target        = { position: new THREE.Vector3(0, 0, 0) };
+    this.orbitAngle    = Math.PI / 3; // 60°
+    this.orbitDistance = 6;
+
+    // distance → height mapping
+    this.minDistance = 3;
+    this.maxDistance = 18;
+    this.minHeight   = 3;
+    this.maxHeight   = 8;
+
+    window.addEventListener('resize', this.handleResize, { passive: true });
+    this.handleResize();
+    this.update();
+  }
+
+  setTarget(target) { this.target = target; this.update(); }
+  notifyUserRotated() {} // (hook for gestures if you add them later)
+
+  _heightFromDistance() {
+    const d = THREE.MathUtils.clamp(this.orbitDistance, this.minDistance, this.maxDistance);
+    const t = (d - this.minDistance) / (this.maxDistance - this.minDistance);
+    return THREE.MathUtils.lerp(this.minHeight, this.maxHeight, t);
+  }
+
+  update() {
+    const tp = this.target?.position || new THREE.Vector3();
+
+    // Clamp ONLY the look-at point so the rig doesn't fight camera stability
+    const lookX = THREE.MathUtils.clamp(tp.x, this.worldMinX, this.worldMaxX);
+    const lookZ = THREE.MathUtils.clamp(tp.z, this.worldMinZ, this.worldMaxZ);
+
+    this.orbitDistance = THREE.MathUtils.clamp(this.orbitDistance, this.minDistance, this.maxDistance);
+    const h = this._heightFromDistance();
+
+    const camPos = new THREE.Vector3(
+      lookX + this.orbitDistance * Math.sin(this.orbitAngle),
+      tp.y + h,
+      lookZ + this.orbitDistance * Math.cos(this.orbitAngle)
+    );
+
+    this.threeCamera.position.copy(camPos);
+    this.threeCamera.lookAt(lookX, tp.y + 1, lookZ);
+  }
+
+  handleResize = () => {
+    this.threeCamera.aspect = window.innerWidth / window.innerHeight;
+    this.threeCamera.updateProjectionMatrix();
+  };
 }
