@@ -13,19 +13,22 @@ export class UIPanel {
     document.body.appendChild(this.fileInput);
 
     // Terrain selection state (UI only)
-    this._terrainSelected = null; // 'sand' | 'dirt' | ... or null
+    this._terrainSelected = null;
+
+    // Height tab UI state
+    this._heightMode = false;
+    this._pinMode = false;
+    this._heightValue = 0;
 
     this._createStyles();
     this._createPanel();
     this._addEventListeners();
   }
 
-  /** Public: reflect Marker UI from main if needed */
   setMarkerToggle(on) {
     if (this.markerToggleEl) this.markerToggleEl.checked = !!on;
   }
 
-  /** Public: clear Terrain selection (used when painting gets cancelled externally) */
   clearTerrainSelection() {
     this._terrainSelected = null;
     if (this.terrainListEl) {
@@ -35,11 +38,21 @@ export class UIPanel {
     }
   }
 
-  // === Tabs content ===
+  setHeightDisplay(v) {
+    if (this.heightValueEl) this.heightValueEl.value = String(v.toFixed(1));
+  }
+
+  reflectHeightUI(mode, pin, val) {
+    if (!this.heightModeEl || !this.pinModeEl) return;
+    this.heightModeEl.checked = !!mode;
+    this.pinModeEl.checked = !!pin;
+    this.setHeightDisplay(val ?? 0);
+  }
+
+  // ---------------- Tabs Content ----------------
   _createGridTabContent() {
     const wrap = document.createElement('div');
 
-    // Row 1: grid size + generate
     const row1 = document.createElement('div');
     row1.className = 'panel-row';
 
@@ -48,18 +61,13 @@ export class UIPanel {
 
     this.widthInput = document.createElement('input');
     this.widthInput.type = 'number';
-    this.widthInput.value = 30;
-    this.widthInput.min = 2;
-    this.widthInput.max = 200;
+    this.widthInput.value = 30; this.widthInput.min = 2; this.widthInput.max = 200;
 
-    const sep = document.createElement('span');
-    sep.textContent = 'x';
+    const sep = document.createElement('span'); sep.textContent = 'x';
 
     this.heightInput = document.createElement('input');
     this.heightInput.type = 'number';
-    this.heightInput.value = 30;
-    this.heightInput.min = 2;
-    this.heightInput.max = 200;
+    this.heightInput.value = 30; this.heightInput.min = 2; this.heightInput.max = 200;
 
     this.generateButton = document.createElement('button');
     this.generateButton.textContent = 'Generate';
@@ -67,27 +75,16 @@ export class UIPanel {
 
     row1.append(label, this.widthInput, sep, this.heightInput, this.generateButton);
 
-    // Row 2: Marker Mode toggle
     const row2 = document.createElement('div');
-    row2.className = 'panel-row';
-    row2.style.marginTop = '8px';
-
-    const tlabel = document.createElement('label');
-    tlabel.textContent = 'Marker Mode';
-
-    const toggleWrap = document.createElement('label');
-    toggleWrap.className = 'switch';
+    row2.className = 'panel-row'; row2.style.marginTop = '8px';
+    const tlabel = document.createElement('label'); tlabel.textContent = 'Marker Mode';
+    const toggleWrap = document.createElement('label'); toggleWrap.className = 'switch';
     this.markerToggleEl = document.createElement('input');
-    this.markerToggleEl.type = 'checkbox';
-    this.markerToggleEl.className = 'marker-toggle';
-    const slider = document.createElement('span');
-    slider.className = 'slider';
+    this.markerToggleEl.type = 'checkbox'; this.markerToggleEl.className = 'marker-toggle';
+    const slider = document.createElement('span'); slider.className = 'slider';
     toggleWrap.append(this.markerToggleEl, slider);
-
-    const hint = document.createElement('span');
-    hint.className = 'muted';
+    const hint = document.createElement('span'); hint.className = 'muted';
     hint.textContent = 'Tap tiles to mark red. Turning OFF locks them as non-walkable.';
-
     row2.append(tlabel, toggleWrap, hint);
 
     const wrapAll = document.createElement('div');
@@ -99,7 +96,6 @@ export class UIPanel {
     const wrap = document.createElement('div');
     wrap.className = 'panel-col';
 
-    // helper to make an item
     const makeItem = (key, label, styleBg) => {
       const btn = document.createElement('button');
       btn.className = 'terrain-item';
@@ -133,60 +129,38 @@ export class UIPanel {
     return wrap;
   }
 
-  // Height tab UI
   _createHeightTabContent() {
     const wrap = document.createElement('div');
     wrap.className = 'panel-col';
 
-    const row1 = document.createElement('div');
-    row1.className = 'panel-row';
-    const l1 = document.createElement('label');
-    l1.textContent = 'Height Mode';
+    const row1 = document.createElement('div'); row1.className = 'panel-row';
+    const mlabel = document.createElement('label'); mlabel.textContent = 'Height Mode';
+    const mSwitch = document.createElement('label'); mSwitch.className = 'switch';
+    this.heightModeEl = document.createElement('input'); this.heightModeEl.type = 'checkbox';
+    const mSlider = document.createElement('span'); mSlider.className = 'slider';
+    mSwitch.append(this.heightModeEl, mSlider);
 
-    const sw1 = document.createElement('label');
-    sw1.className = 'switch';
-    this.heightModeEl = document.createElement('input');
-    this.heightModeEl.type = 'checkbox';
-    const s1 = document.createElement('span'); s1.className = 'slider';
-    sw1.append(this.heightModeEl, s1);
+    const pinLabel = document.createElement('label'); pinLabel.textContent = 'Pin tiles';
+    const pSwitch = document.createElement('label'); pSwitch.className = 'switch';
+    this.pinModeEl = document.createElement('input'); this.pinModeEl.type = 'checkbox';
+    const pSlider = document.createElement('span'); pSlider.className = 'slider';
+    pSwitch.append(this.pinModeEl, pSlider);
 
-    const l2 = document.createElement('label');
-    l2.textContent = 'Pin tiles';
-    l2.style.marginLeft = '18px';
+    row1.append(mlabel, mSwitch, pinLabel, pSwitch);
 
-    const sw2 = document.createElement('label');
-    sw2.className = 'switch';
-    this.pinModeEl = document.createElement('input');
-    this.pinModeEl.type = 'checkbox';
-    const s2 = document.createElement('span'); s2.className = 'slider';
-    sw2.append(this.pinModeEl, s2);
-
-    row1.append(l1, sw1, l2, sw2);
-
-    const row2 = document.createElement('div');
-    row2.className = 'panel-row';
-    const lh = document.createElement('label'); lh.textContent = 'Height';
+    const row2 = document.createElement('div'); row2.className = 'panel-row';
+    const hlabel = document.createElement('label'); hlabel.textContent = 'Height';
     this.heightValueEl = document.createElement('input');
-    this.heightValueEl.type = 'number';
-    this.heightValueEl.value = '0.0';
-    this.heightValueEl.step = '0.2';
-    this.heightValueEl.min = '-1.0';
-    this.heightValueEl.max = '1.0';
-    this.heightValueEl.className = 'height-num';
+    this.heightValueEl.type = 'text'; this.heightValueEl.value = '0.0';
+    this.heightValueEl.readOnly = true; this.heightValueEl.className = 'height-val';
 
-    const downBtn = document.createElement('button');
-    downBtn.textContent = 'Down';
-    downBtn.className = 'height-down';
+    const downBtn = document.createElement('button'); downBtn.className = 'down-btn'; downBtn.textContent = 'Down';
+    const upBtn   = document.createElement('button'); upBtn.className = 'up-btn';   upBtn.textContent = 'Up';
 
-    const upBtn = document.createElement('button');
-    upBtn.textContent = 'Up';
-    upBtn.className = 'height-up';
+    row2.append(hlabel, this.heightValueEl, downBtn, upBtn);
 
-    row2.append(lh, this.heightValueEl, downBtn, upBtn);
-
-    const hint = document.createElement('div');
-    hint.className = 'hint';
-    hint.innerHTML = 'Pin ON: tap to green-highlight tiles (they hold shape & get walls). Pin OFF: tap to set tile height.<br/>Heights are in 0.2 steps (−1.0..+1.0). Turning Height Mode OFF clears green pins and re-enables tap-to-move.';
+    const hint = document.createElement('div'); hint.className = 'hint';
+    hint.textContent = 'Pin ON: tap to green-highlight tiles (they hold shape and create walls). Pin OFF: tap to set tile height.';
 
     wrap.append(row1, row2, hint);
     return wrap;
@@ -196,23 +170,16 @@ export class UIPanel {
     const wrap = document.createElement('div');
     wrap.className = 'panel-col';
 
-    const row1 = document.createElement('div');
-    row1.className = 'panel-row';
-    const saveBtn = document.createElement('button');
-    saveBtn.className = 'save-btn';
-    saveBtn.textContent = 'Save Project…';
+    const row1 = document.createElement('div'); row1.className = 'panel-row';
+    const saveBtn = document.createElement('button'); saveBtn.className = 'save-btn'; saveBtn.textContent = 'Save Project…';
     row1.appendChild(saveBtn);
 
-    const row2 = document.createElement('div');
-    row2.className = 'panel-row';
-    const loadBtn = document.createElement('button');
-    loadBtn.className = 'load-btn';
-    loadBtn.textContent = 'Load Project…';
+    const row2 = document.createElement('div'); row2.className = 'panel-row';
+    const loadBtn = document.createElement('button'); loadBtn.className = 'load-btn'; loadBtn.textContent = 'Load Project…';
     row2.appendChild(loadBtn);
 
-    const hint = document.createElement('div');
-    hint.className = 'hint';
-    hint.textContent = 'Saves include grid size, camera, markers, painted tiles, and height grid + pins.';
+    const hint = document.createElement('div'); hint.className = 'hint';
+    hint.textContent = 'Saves include grid, paints, camera, markers, HEIGHTS & pins.';
 
     wrap.append(row1, row2, hint);
     return wrap;
@@ -230,10 +197,7 @@ export class UIPanel {
       b.className = 'tab';
       b.textContent = name;
       b.dataset.tabName = name;
-      if (i === 0) {
-        b.classList.add('active');
-        this.activeTab = b;
-      }
+      if (i === 0) { b.classList.add('active'); this.activeTab = b; }
       tabsContainer.appendChild(b);
     });
 
@@ -247,7 +211,7 @@ export class UIPanel {
   }
 
   _addEventListeners() {
-    // Switch tabs
+    // Tab switching
     this.panelElement.querySelector('.tabs-container').addEventListener('click', (e) => {
       const clicked = e.target.closest('.tab');
       if (!clicked || clicked === this.activeTab) return;
@@ -268,8 +232,8 @@ export class UIPanel {
         this.panelElement.dispatchEvent(evt);
       } else if (tabName === 'Height') {
         this.contentElement.appendChild(this._createHeightTabContent());
-        const evt = new CustomEvent('height-tab-opened', {});
-        this.panelElement.dispatchEvent(evt);
+        // reflect current ui state
+        this.reflectHeightUI(this._heightMode, this._pinMode, this._heightValue);
       } else if (tabName === 'Settings') {
         this.contentElement.appendChild(this._createSettingsTabContent());
       } else {
@@ -277,7 +241,7 @@ export class UIPanel {
       }
     });
 
-    // Delegated clicks/changes inside content
+    // Delegated clicks in content
     this.contentElement.addEventListener('click', (e) => {
       // Generate
       const genBtn = e.target.closest('.generate-btn');
@@ -291,106 +255,80 @@ export class UIPanel {
 
       // Save
       const saveBtn = e.target.closest('.save-btn');
-      if (saveBtn) {
-        let filename = window.prompt('Name your save file:', 'titanmap.json');
-        if (!filename) return;
-        if (!filename.toLowerCase().endsWith('.json')) filename += '.json';
-        const evt = new CustomEvent('save-project', { detail: { filename } });
-        this.panelElement.dispatchEvent(evt);
-        return;
-      }
+      if (saveBtn) { this.panelElement.dispatchEvent(new CustomEvent('save-project')); return; }
 
-      // Load
+      // Load (trigger hidden input)
       const loadBtn = e.target.closest('.load-btn');
-      if (loadBtn) {
-        this.fileInput.value = '';
-        this.fileInput.click();
-        return;
-      }
+      if (loadBtn) { this.fileInput.value = ''; this.fileInput.click(); return; }
 
-      // Height up/down
-      if (e.target.closest('.height-up')) {
-        const v = Math.min(1.0, (parseFloat(this.heightValueEl.value || '0') + 0.2));
-        this.heightValueEl.value = v.toFixed(1);
-        const evt = new CustomEvent('height-value-change', { detail: { value: v }});
-        this.panelElement.dispatchEvent(evt);
-        return;
-      }
-      if (e.target.closest('.height-down')) {
-        const v = Math.max(-1.0, (parseFloat(this.heightValueEl.value || '0') - 0.2));
-        this.heightValueEl.value = v.toFixed(1);
-        const evt = new CustomEvent('height-value-change', { detail: { value: v }});
-        this.panelElement.dispatchEvent(evt);
-        return;
-      }
-
-      // Terrain item click (toggle select)
+      // Terrain item click
       const item = e.target.closest('.terrain-item');
       if (item && this.terrainListEl?.contains(item)) {
         const type = item.dataset.type;
         if (this._terrainSelected === type) {
-          // toggle off
           item.classList.remove('selected');
           this._terrainSelected = null;
-          const evt = new CustomEvent('terrain-select', { detail: { type, active: false } });
-          this.panelElement.dispatchEvent(evt);
+          this.panelElement.dispatchEvent(new CustomEvent('terrain-select', { detail: { type, active: false } }));
         } else {
-          // switch to new selection
           this.terrainListEl.querySelectorAll('.terrain-item.selected')
             .forEach(el => el.classList.remove('selected'));
           item.classList.add('selected');
           this._terrainSelected = type;
-          const evt = new CustomEvent('terrain-select', { detail: { type, active: true } });
-          this.panelElement.dispatchEvent(evt);
+          this.panelElement.dispatchEvent(new CustomEvent('terrain-select', { detail: { type, active: true } }));
         }
+        return;
+      }
+
+      // Height Up/Down
+      const upBtn = e.target.closest('.up-btn');
+      const downBtn = e.target.closest('.down-btn');
+      if (upBtn || downBtn) {
+        const delta = upBtn ? +0.2 : -0.2;
+        const cur = parseFloat(this.heightValueEl.value || '0') || 0;
+        let next = Math.round((cur + delta) / 0.2) * 0.2;
+        next = Math.max(-50, Math.min(50, next));
+        this.heightValueEl.value = next.toFixed(1);
+        this._heightValue = next;
+        this.panelElement.dispatchEvent(new CustomEvent('height-change', { detail: { value: next } }));
+        return;
       }
     });
 
-    // Changes
+    // Switches & inputs
     this.panelElement.addEventListener('change', (e) => {
       // Marker toggle
-      const chk = e.target.closest('.marker-toggle');
-      if (chk) {
-        const wantOn = !!chk.checked;
+      const chkM = e.target.closest('.marker-toggle');
+      if (chkM) {
+        const wantOn = !!chkM.checked;
         const evt = new CustomEvent('marker-toggle-request', { detail: { wantOn } });
         this.panelElement.dispatchEvent(evt);
         return;
       }
+
       // Height mode
-      if (e.target === this.heightModeEl) {
-        const on = !!this.heightModeEl.checked;
-        const evt = new CustomEvent('height-mode', { detail: { on }});
-        this.panelElement.dispatchEvent(evt);
+      if (this.heightModeEl && e.target === this.heightModeEl) {
+        this._heightMode = !!this.heightModeEl.checked;
+        this.panelElement.dispatchEvent(new CustomEvent('height-mode-toggle', { detail: { on: this._heightMode } }));
         return;
       }
+
       // Pin mode
-      if (e.target === this.pinModeEl) {
-        const on = !!this.pinModeEl.checked;
-        const evt = new CustomEvent('height-pin-mode', { detail: { on }});
-        this.panelElement.dispatchEvent(evt);
+      if (this.pinModeEl && e.target === this.pinModeEl) {
+        this._pinMode = !!this.pinModeEl.checked;
+        this.panelElement.dispatchEvent(new CustomEvent('height-pin-toggle', { detail: { on: this._pinMode } }));
         return;
-      }
-      // Height numeric
-      if (e.target === this.heightValueEl) {
-        let v = parseFloat(this.heightValueEl.value || '0');
-        v = Math.max(-1, Math.min(1, Math.round(v*5)/5)); // snap 0.2
-        this.heightValueEl.value = v.toFixed(1);
-        const evt = new CustomEvent('height-value-change', { detail: { value: v }});
-        this.panelElement.dispatchEvent(evt);
       }
     });
 
-    // Hidden file input (Load)
+    // File input (Load)
     this.fileInput.addEventListener('change', () => {
       const file = this.fileInput.files && this.fileInput.files[0];
       if (!file) return;
-
       const reader = new FileReader();
       reader.onload = () => {
         try {
           const data = JSON.parse(reader.result);
-          const evt = new CustomEvent('load-project-data', { detail: { data, filename: file.name } });
-          this.panelElement.dispatchEvent(evt);
+          this.panelElement.dispatchEvent(new CustomEvent('load-project-data', { detail: { data, filename: file.name } }));
         } catch {
           alert('Invalid save file (not JSON).');
         }
@@ -417,8 +355,8 @@ export class UIPanel {
       .tabs-container { display: flex; border-bottom: 1px solid rgba(255,255,255,0.1); }
       .tab {
         flex: 1; text-align: center; background: none; border: none; padding: 12px 10px; color: #aaa;
-        font-family: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
-        transition: color 0.2s ease; border-bottom: 2px solid transparent; white-space: nowrap;
+        font: 600 14px/1.2 inherit; cursor: pointer; transition: color 0.2s ease;
+        border-bottom: 2px solid transparent; white-space: nowrap;
       }
       .tab:hover { color: #fff; }
       .tab.active { color: #fff; border-bottom-color: #00aaff; }
@@ -432,15 +370,21 @@ export class UIPanel {
       }
       .panel-row span { color: #777; font-weight: bold; }
       .muted { color: #8a8d92; font-weight: 400; font-size: 12px; }
-      .generate-btn, .save-btn, .load-btn {
+      .generate-btn, .save-btn, .load-btn, .down-btn, .up-btn {
         background: #00aaff; color: #fff; border: none; padding: 8px 16px;
         border-radius: 2px; font-weight: 600; cursor: pointer;
       }
       .load-btn { background: #6a5acd; }
+      .down-btn { background: #2e2f36; }
+      .up-btn   { background: #00a86b; }
+      .height-val {
+        width: 84px; background: #111; border: 1px solid #444; color: #fff;
+        padding: 8px; border-radius: 2px; text-align: center;
+      }
       .hint { opacity: 0.7; font-size: 12px; margin-top: 4px; }
 
       /* pretty switch */
-      .switch { position: relative; display: inline-block; width: 44px; height: 24px; margin-left: 6px; }
+      .switch { position: relative; display: inline-block; width: 44px; height: 24px; }
       .switch input { opacity: 0; width: 0; height: 0; }
       .slider {
         position: absolute; cursor: pointer; inset: 0;
@@ -467,13 +411,11 @@ export class UIPanel {
         cursor: pointer;
       }
       .terrain-item .thumb {
-        width: 64px; height: 64px; border-radius: 6px; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.25);
+        width: 64px; height: 64px; border-radius: 6px;
+        box-shadow: inset 0 0 0 1px rgba(0,0,0,0.25);
       }
       .terrain-item .label { font-size: 12px; color: #dcdde2; }
       .terrain-item.selected { outline: 2px solid #00aaff; outline-offset: 2px; }
-
-      /* height number input tweak */
-      .height-num { width: 72px !important; }
     `;
     document.head.appendChild(style);
   }
