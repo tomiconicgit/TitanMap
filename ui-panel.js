@@ -89,8 +89,23 @@ export class UIPanel {
 
     row2.append(tlabel, toggleWrap, hint);
 
+    // Row 3: Show tile outlines toggle (NEW)
+    const row3 = document.createElement('div');
+    row3.className = 'panel-row';
+    const olabel = document.createElement('label');
+    olabel.textContent = 'Show tile outlines';
+    const owrap = document.createElement('label');
+    owrap.className = 'switch';
+    this.outlineToggleEl = document.createElement('input');
+    this.outlineToggleEl.type = 'checkbox';
+    this.outlineToggleEl.className = 'outline-toggle';
+    const oslider = document.createElement('span');
+    oslider.className = 'slider';
+    owrap.append(this.outlineToggleEl, oslider);
+    row3.append(olabel, owrap);
+
     const wrapAll = document.createElement('div');
-    wrapAll.append(row1, row2);
+    wrapAll.append(row1, row2, row3);
     return wrapAll;
   }
 
@@ -98,7 +113,6 @@ export class UIPanel {
     const wrap = document.createElement('div');
     wrap.className = 'panel-col';
 
-    // helper to make an item
     const makeItem = (key, label, styleBg) => {
       const btn = document.createElement('button');
       btn.className = 'terrain-item';
@@ -217,7 +231,7 @@ export class UIPanel {
 
     const hint = document.createElement('div');
     hint.className = 'hint';
-    hint.textContent = 'Saves include grid size, character tile, camera view, settings, markers, terrain & heightfield.';
+    hint.textContent = 'Saves include grid size, character position, camera view, and view settings.';
 
     wrap.append(row1, row2, hint);
     return wrap;
@@ -348,8 +362,18 @@ export class UIPanel {
       }
     });
 
-    // Marker toggle
+    // All 'change' toggles
     this.panelElement.addEventListener('change', (e) => {
+      // Grid: show tile outlines toggle (NEW)
+      const outline = e.target.closest('.outline-toggle');
+      if (outline) {
+        const wantOn = !!outline.checked;
+        const evt = new CustomEvent('grid-outline-toggle', { detail: { wantOn } });
+        this.panelElement.dispatchEvent(evt);
+        return;
+      }
+
+      // Marker toggle
       const chk = e.target.closest('.marker-toggle');
       if (chk) {
         const wantOn = !!chk.checked;
@@ -413,7 +437,7 @@ export class UIPanel {
         width: calc(100% - 30px); max-width: 700px; z-index: 10;
         background-color: rgba(30, 32, 37, 0.8);
         backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-        border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 3px;
+        border: 1px solid rgba(255,255,255,0.1); border-radius: 3px;
         box-shadow: 0 8px 30px rgba(0,0,0,0.3); color: #e8e8ea;
         padding-bottom: var(--safe-bottom); overflow: hidden;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
