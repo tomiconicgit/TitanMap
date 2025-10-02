@@ -1,27 +1,332 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <title>TitanMap – Sky + Shadows</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, user-scalable=no" />
-  <meta name="theme-color" content="#111318" />
-  <style>
-    html,body{margin:0;height:100%;background:#111318;overflow:hidden}
-    canvas{display:block}
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+    
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="iOS UI Test">
+    
+    <title>iPhone PWA UI Tester</title>
 
-  <!-- Three.js import map -->
-  <script type="importmap">
-  {
-    "imports": {
-      "three": "https://cdn.jsdelivr.net/npm/three@0.168.0/build/three.module.js",
-      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.168.0/examples/jsm/"
-    }
-  }
-  </script>
+    <style>
+        :root {
+            --system-blue: #007aff;
+            --system-gray: #f2f2f7;
+            --system-text: #000;
+            --system-background: #fff;
+            --border-color: #c6c6c8;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --system-gray: #1c1c1e;
+                --system-text: #fff;
+                --system-background: #000;
+                --border-color: #38383a;
+            }
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--system-gray);
+            color: var(--system-text);
+            margin: 0;
+            padding: 20px;
+            padding-top: env(safe-area-inset-top, 20px);
+            padding-bottom: env(safe-area-inset-bottom, 20px);
+            -webkit-font-smoothing: antialiased;
+        }
+
+        main {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        h1, h2 {
+            padding-bottom: 5px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        h1 { font-size: 1.8em; }
+        h2 { font-size: 1.4em; margin-top: 30px;}
+
+        p, .note {
+            font-size: 0.9em;
+            line-height: 1.5;
+            color: #8e8e93;
+        }
+
+        .button-group {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        button, .button-like {
+            font-size: 1em;
+            font-weight: 500;
+            padding: 12px 15px;
+            border: none;
+            background-color: var(--system-background);
+            color: var(--system-blue);
+            cursor: pointer;
+            text-align: left;
+            border-radius: 10px;
+            width: 100%;
+            transition: background-color 0.2s ease;
+        }
+
+        button:active {
+            background-color: #e5e5ea;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            button:active {
+                background-color: #2c2c2e;
+            }
+        }
+
+        input[type="file"] { display: none; }
+        
+        /* Custom HTML Modal Styling to mimic iOS */
+        dialog {
+            border: none;
+            border-radius: 14px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.2);
+            padding: 0;
+            width: 270px;
+            background-color: rgba(242, 242, 247, 0.8);
+            backdrop-filter: saturate(180%) blur(20px);
+            -webkit-backdrop-filter: saturate(180%) blur(20px);
+        }
+        
+        dialog::backdrop {
+            background-color: rgba(0, 0, 0, 0.4);
+        }
+
+        .modal-content {
+            padding: 20px;
+            text-align: center;
+        }
+
+        .modal-content h3 {
+            margin: 0 0 5px 0;
+            font-size: 1.1em;
+            font-weight: 600;
+            color: var(--system-text);
+        }
+
+        .modal-content p {
+            margin: 0 0 20px 0;
+            font-size: 0.9em;
+            color: var(--system-text);
+        }
+
+        .modal-actions {
+            display: flex;
+            border-top: 1px solid rgba(60, 60, 67, 0.29);
+        }
+
+        .modal-actions button {
+            flex: 1;
+            background: none;
+            border: none;
+            padding: 12px;
+            font-size: 1.05em;
+            color: var(--system-blue);
+            cursor: pointer;
+        }
+
+        .modal-actions button:first-child {
+             border-right: 1px solid rgba(60, 60, 67, 0.29);
+        }
+    </style>
 </head>
 <body>
-  <script src="./debugger.js"></script>
-  <script type="module" src="./main.js"></script>
+
+    <main>
+        <h1>iPhone PWA UI Tester</h1>
+        <p>Use these buttons to test native iOS UI elements that can be triggered from a web app. For the best experience, use Safari's "Add to Home Screen" feature.</p>
+
+        <h2>Basic Dialogs</h2>
+        <p>These are simple, but they block user interaction on the page until dismissed.</p>
+        <div class="button-group">
+            <button id="alertBtn">Test Alert</button>
+            <button id="confirmBtn">Test Confirm</button>
+            <button id="promptBtn">Test Prompt</button>
+        </div>
+
+        <h2>Native Sheets & Pickers</h2>
+        <p class="note">These APIs require a secure context (HTTPS) and often a user gesture (like a tap).</p>
+        <div class="button-group">
+            <button id="shareBtn">Trigger Share Sheet</button>
+            <button id="contactsBtn">Open Contact Picker</button>
+            <label for="file-picker" class="button-like">Open File Picker</label>
+            <input type="file" id="file-picker">
+            <label for="camera-picker" class="button-like">Take a Photo (camera)</label>
+            <input type="file" accept="image/*" capture="environment" id="camera-picker">
+        </div>
+
+        <h2>Native Input Controls</h2>
+        <p>Tapping these input fields will bring up the native iOS UI for that type.</p>
+        <div class="button-group" style="background-color: var(--system-background); padding: 15px; border-radius: 10px;">
+             Date: <input type="date" style="width: 100%; margin-bottom: 10px;">
+             Time: <input type="time" style="width: 100%; margin-bottom: 10px;">
+             Date & Time: <input type="datetime-local" style="width: 100%; margin-bottom: 10px;">
+             Color: <input type="color" value="#007aff" style="width: 100%; margin-bottom: 10px; height: 40px;">
+             Range: <input type="range" style="width: 100%;">
+        </div>
+        
+        <h2>Device Integrations</h2>
+        <p class="note">Permissions will be requested for some of these features.</p>
+        <div class="button-group">
+            <button id="vibrateBtn">Test Haptic Feedback (Vibrate)</button>
+            <button id="notificationBtn">Request & Send Notification</button>
+            <button id="fullscreenBtn">Enter Fullscreen</button>
+        </div>
+
+        <h2>Modern HTML `<dialog>` Modal</h2>
+        <p>This is not a native iOS modal, but the modern web standard. It is highly stylable and non-blocking. This one is styled to look like an iOS alert.</p>
+        <div class="button-group">
+            <button id="showModalBtn">Show Custom HTML Modal</button>
+        </div>
+    </main>
+    
+    <dialog id="customModal">
+        <div class="modal-content">
+            <h3>Custom Modal</h3>
+            <p>This is a &lt;dialog&gt; element, styled to look native. It's more flexible than alert().</p>
+        </div>
+        <div class="modal-actions">
+            <button id="cancelModalBtn">Cancel</button>
+            <button id="okModalBtn">OK</button>
+        </div>
+    </dialog>
+
+
+    <script>
+        // --- Basic Dialogs ---
+        document.getElementById('alertBtn').addEventListener('click', () => {
+            alert('This is a native alert dialog.');
+        });
+
+        document.getElementById('confirmBtn').addEventListener('click', () => {
+            const result = confirm('This is a native confirm dialog.\nDid you press OK?');
+            alert(`You chose: ${result}`);
+        });
+
+        document.getElementById('promptBtn').addEventListener('click', () => {
+            const result = prompt('This is a native prompt.\nPlease enter your name:', 'Gemini');
+            if (result !== null) {
+                alert(`Hello, ${result}!`);
+            } else {
+                alert('You cancelled the prompt.');
+            }
+        });
+
+        // --- Native Sheets & Pickers ---
+        document.getElementById('shareBtn').addEventListener('click', async () => {
+            if (navigator.share) {
+                try {
+                    await navigator.share({
+                        title: 'PWA Test',
+                        text: 'Check out this awesome PWA UI tester!',
+                        url: window.location.href,
+                    });
+                    console.log('Content shared successfully!');
+                } catch (error) {
+                    alert(`Sharing failed: ${error}`);
+                }
+            } else {
+                alert('The Web Share API is not supported in this browser.');
+            }
+        });
+
+        document.getElementById('contactsBtn').addEventListener('click', async () => {
+            if ('contacts' in navigator && 'select' in navigator.contacts) {
+                try {
+                    const contacts = await navigator.contacts.select(['name', 'email', 'tel'], { multiple: false });
+                    if (contacts.length > 0) {
+                        const contact = contacts[0];
+                        let info = `Selected Contact:\nName: ${contact.name.join(', ')}`;
+                        if(contact.email.length > 0) info += `\nEmail: ${contact.email[0]}`;
+                        if(contact.tel.length > 0) info += `\nTel: ${contact.tel[0]}`;
+                        alert(info);
+                    }
+                } catch (error) {
+                    alert(`Could not access contacts: ${error}`);
+                }
+            } else {
+                alert('The Contact Picker API is not available.\n(Requires HTTPS and is an experimental feature)');
+            }
+        });
+        
+        document.getElementById('file-picker').addEventListener('change', (event) => {
+            if(event.target.files.length > 0) {
+                alert(`You selected a file: ${event.target.files[0].name}`);
+            }
+        });
+
+        document.getElementById('camera-picker').addEventListener('change', (event) => {
+            if(event.target.files.length > 0) {
+                alert(`You captured an image: ${event.target.files[0].name}`);
+            }
+        });
+
+        // --- Device Integrations ---
+        document.getElementById('vibrateBtn').addEventListener('click', () => {
+            if ('vibrate' in navigator) {
+                // Vibrate for 200ms
+                navigator.vibrate(200);
+            } else {
+                alert('The Vibration API is not supported.');
+            }
+        });
+        
+        document.getElementById('notificationBtn').addEventListener('click', () => {
+             if (!('Notification' in window)) {
+                alert('This browser does not support desktop notification');
+            } else if (Notification.permission === 'granted') {
+                new Notification('PWA Test!', { body: 'This is a native notification.' });
+            } else if (Notification.permission !== 'denied') {
+                Notification.requestPermission().then((permission) => {
+                    if (permission === 'granted') {
+                        new Notification('PWA Test!', { body: 'This is a native notification.' });
+                    }
+                });
+            } else {
+                alert('Notification permission has been denied. You need to enable it in your device settings.');
+            }
+        });
+
+        document.getElementById('fullscreenBtn').addEventListener('click', () => {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(err => {
+                    alert(`Error attempting to enable full-screen mode: ${err.message} (${err.name})`);
+                });
+            } else {
+                document.exitFullscreen();
+            }
+        });
+        
+        // --- Custom HTML Modal ---
+        const modal = document.getElementById('customModal');
+        document.getElementById('showModalBtn').addEventListener('click', () => {
+            modal.showModal();
+        });
+        document.getElementById('okModalBtn').addEventListener('click', () => {
+            modal.close('ok');
+        });
+        document.getElementById('cancelModalBtn').addEventListener('click', () => {
+            modal.close('cancel');
+        });
+        modal.addEventListener('close', () => {
+            console.log(`Modal closed with value: ${modal.returnValue}`);
+        });
+
+    </script>
 </body>
 </html>
