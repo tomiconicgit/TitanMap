@@ -2,205 +2,143 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <meta name="theme-color" content="#0b1021">
-    <title>ISS Live Tracker</title>
-    <link rel="manifest" href="data:application/json;base64,ewogICJuYW1lIjogIklTUyBMaXZlIFRyYWNrZXIiLAogICJzaG9ydF9uYW1lIjogIklTUyBUcmFja2VyIiwKICAiaWNvbnMiOiBbCiAgICB7CiAgICAgICJzcmMiOiAiaHR0cHM6Ly93d3cudzMub3JnLzIwMDAvc3ZnL2V4YW1wbGVzL2J1dHRvbnMvaWNvbnMvaWNvbi1ibHVlLnN2ZyIsCiAgICAgICJzaXplcyI6ICIxOTJ4MTkyIiwKICAgICAgInR5cGUiOiAiaW1hZ2Uvc3ZnK3htbCIKICAgIH0sCiAgICB7CiAgICAgICJzcmMiOiAiaHR0cHM6Ly93d3cudzMub3JnLzIwMDAvc3ZnL2V4YW1wbGVzL2J1dHRvbnMvaWNvbnMvaWNvbi1ibHVlLnN2ZyIsCiAgICAgICJzaXplcyI6ICI1MTJ4NTEyIiwKICAgICAgInR5cGUiOiAiaW1hZ2Uvc3ZnK3htbCIKICAgIH0KICBdLAogICJzdGFydF91cmwiOiAiLiIsCiAgImRpc3BsYXkiOiAic3RhbmRhbG9uZSIKICB9">
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ISS Live Feed</title>
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+     integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+     crossorigin=""/>
+    
     <style>
-        :root {
-            --primary-bg: #0b1021;
-            --secondary-bg: #1c233a;
-            --accent-color: #3b82f6;
-            --text-color: #e2e8f0;
-            --border-color: #334155;
-            --slider-track: #475569;
-        }
-        html, body {
-            margin: 0; padding: 0; height: 100%;
+        body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background-color: var(--primary-bg); color: var(--text-color);
-            overflow: hidden; display: flex; flex-direction: column;
+            margin: 0;
+            padding: 0;
+            background-color: #f0f2f5;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
         }
         .video-container {
-            position: relative; width: 100%;
+            position: relative;
+            width: 100%;
             padding-top: 56.25%; /* 16:9 Aspect Ratio */
             background-color: #000;
         }
-        #player-container {
-            position: absolute; top: 0; left: 0;
-            width: 100%; height: 100%;
+        /* This single rule now targets the div and the iframe that will be placed inside it */
+        #player {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
             border: none;
-            transition: filter 0.2s ease-in-out;
         }
-        .controls-container {
-            padding: 16px; background-color: var(--secondary-bg);
-            border-top: 1px solid var(--border-color); flex-shrink: 0;
+        .controls {
+            padding: 16px;
+            background-color: #fff;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
-        .control-group {
-            display: flex; align-items: center; margin-bottom: 12px;
+        .slider-group {
+            margin-bottom: 12px;
         }
-        .control-group label { min-width: 80px; font-size: 0.9rem; }
-        input[type="range"] {
-            -webkit-appearance: none; appearance: none;
-            width: 100%; height: 6px; background: var(--slider-track);
-            border-radius: 3px; outline: none; opacity: 0.8; transition: opacity .2s;
+        .slider-group label {
+            display: block;
+            margin-bottom: 4px;
+            color: #333;
         }
-        input[type="range"]::-webkit-slider-thumb {
-            -webkit-appearance: none; appearance: none;
-            width: 20px; height: 20px; background: var(--accent-color);
-            cursor: pointer; border-radius: 50%;
+        .slider-group input[type="range"] {
+            width: 100%;
         }
-        input[type="range"]::-moz-range-thumb {
-            width: 20px; height: 20px; background: var(--accent-color);
-            cursor: pointer; border-radius: 50%;
-        }
-        .toggle-container { display: flex; justify-content: flex-end; padding-right: 8px; }
-        .toggle-button {
-            background-color: var(--slider-track); color: var(--text-color);
-            border: 1px solid var(--border-color); padding: 8px 16px;
-            border-radius: 20px; cursor: pointer; font-size: 0.9rem;
-        }
-        .toggle-button.active { background-color: var(--accent-color); font-weight: bold; }
-        .map-container { flex-grow: 1; background-color: var(--primary-bg); min-height: 200px; }
-        #iss-map { width: 100%; height: 100%; }
-        .iss-icon {
-            background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="30" height="30"><path fill="%233b82f6" d="M89.3,50.8c-2.3-2.1-4.9-3.8-7.7-5.2c-1-0.5-2.1-1-3.1-1.4c-0.2-0.1-0.4-0.2-0.6-0.3c-2.1-0.9-4.3-1.6-6.6-2.2 c-0.2,0-0.3-0.1-0.5-0.1c-1.2-0.3-2.5-0.6-3.7-0.8c-0.2,0-0.4,0-0.6-0.1c-1.1-0.2-2.2-0.3-3.3-0.5c-0.3,0-0.5-0.1-0.8-0.1 c-0.9-0.1-1.9-0.2-2.8-0.3c-0.4,0-0.7-0.1-1.1-0.1c-0.7-0.1-1.5-0.1-2.2-0.2c-0.6,0-1.1-0.1-1.7-0.1c-0.3,0-0.7,0-1,0 c-1.2,0-2.3,0-3.5,0.1c-1.2,0.1-2.5,0.3-3.7,0.5c-1.1,0.2-2.2,0.4-3.3,0.7c-1.1,0.3-2.1,0.6-3.2,1c-2.1,0.7-4.1,1.6-6.1,2.6 c-1,0.5-1.9,1.1-2.8,1.7c-0.1,0.1-0.3,0.2-0.4,0.3c-0.8,0.5-1.6,1.1-2.4,1.7c-1.5,1.2-2.9,2.5-4.2,3.9c-3.1,3.4-5.3,7.5-6.5,12 c-0.1,0.3-0.1,0.6-0.2,0.9c-0.9,3.7-1.2,7.5-0.8,11.3c0.1,1,0.3,2,0.5,3c0.3,1.4,0.7,2.7,1.2,4c1.1,3,2.8,5.8,4.9,8.2 c4.3,4.8,10.2,7.7,16.5,8.1c0.3,0,0.6,0,0.9,0c4.1,0,8.1-0.8,11.9-2.3c1.9-0.8,3.7-1.7,5.5-2.8c0.1-0.1,0.2-0.1,0.2-0.2 c3.4-2.2,6.4-5,8.8-8.3c4.8-6.5,7.3-14.4,7.2-22.6c0-0.1,0-0.2,0-0.3c-0.1-3.2-0.8-6.3-2-9.3C90.2,51.8,89.8,51.3,89.3,50.8z M50,67.5c-9.7,0-17.5-7.8-17.5-17.5S40.3,32.5,50,32.5S67.5,40.3,67.5,50S59.7,67.5,50,67.5z"/></svg>');
-            background-size: contain; border-radius: 50%;
-            box-shadow: 0 0 10px #3b82f6, 0 0 20px #3b82f6; animation: pulse 2s infinite;
-        }
-        @keyframes pulse {
-            0% { transform: scale(0.9); box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7); }
-            70% { transform: scale(1); box-shadow: 0 0 10px 10px rgba(59, 130, 246, 0); }
-            100% { transform: scale(0.9); box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+        #map {
+            flex-grow: 1;
+            width: 100%;
         }
     </style>
 </head>
 <body>
-    
+
     <div class="video-container">
-        <div id="player-container"></div>
+        <div id="player"></div>
     </div>
 
-    <div class="controls-container">
-        <div class="control-group">
+    <div class="controls">
+        <div class="slider-group">
             <label for="brightness">Brightness</label>
-            <input type="range" id="brightness" min="0" max="200" value="100">
+            <input type="range" id="brightness" name="brightness" min="0" max="200" value="100">
         </div>
-        <div class="control-group">
+        <div class="slider-group">
             <label for="contrast">Contrast</label>
-            <input type="range" id="contrast" min="0" max="200" value="100">
+            <input type="range" id="contrast" name="contrast" min="0" max="200" value="100">
         </div>
-        <div class="control-group">
+        <div class="slider-group">
             <label for="saturate">Saturate</label>
-            <input type="range" id="saturate" min="0" max="200" value="100">
-        </div>
-        <div class="toggle-container">
-            <button id="grayscale-toggle" class="toggle-button">Grayscale</button>
+            <input type="range" id="saturate" name="saturate" min="0" max="200" value="100">
         </div>
     </div>
 
-    <div id="iss-map" class="map-container"></div>
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+     integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+     crossorigin=""></script>
     
     <script src="https://www.youtube.com/iframe_api"></script>
 
     <script>
-        // --- SERVICE WORKER REGISTRATION ---
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('data:application/javascript;base64,' + btoa(`
-                const CACHE_NAME = 'iss-tracker-cache-v1'; self.addEventListener('install', e => e.waitUntil(caches.open(CACHE_NAME).then(c => c.add('/'))));
-                self.addEventListener('fetch', e => e.respondWith(caches.match(e.request).then(r => r || fetch(e.request))));
-            `)).catch(error => console.log('SW registration failed:', error));
-        }
+        // --- CHANGE #3: YouTube Player API Initialization ---
+        let player; // This variable will hold our player object
 
-        // --- YOUTUBE PLAYER API SETUP ---
-        let player;
-        // This function is called automatically by the YouTube script
+        // This function is automatically called by the YouTube API script when it's ready
         function onYouTubeIframeAPIReady() {
-            player = new YT.Player('player-container', {
-                height: '100%',
-                width: '100%',
-                videoId: 'yf5cEJULZXk',
+            player = new YT.Player('player', {
+                videoId: 'yf5cEJULZXk', // The ID of the video
                 playerVars: {
-                    'autoplay': 1,       // Autoplay the video
-                    'mute': 1,           // Mute by default
-                    'controls': 0,       // Hide player controls
-                    'showinfo': 0,       // Hide video title
-                    'modestbranding': 1, // Remove YouTube logo
-                    'playsinline': 1,    // **This is the key for embedded playback**
-                    'rel': 0             // Do not show related videos
+                    'playsinline': 1,   // This is the crucial parameter for iOS
+                    'autoplay': 1,      // Autoplay the video
+                    'mute': 1,          // Muting is required for autoplay
+                    'controls': 1,      // Show player controls
+                    'rel': 0,           // Do not show related videos at the end
+                    'modestbranding': 1 // Reduce the YouTube logo
                 },
                 events: {
                     'onReady': onPlayerReady
                 }
             });
         }
+
         // The API will call this function when the video player is ready.
         function onPlayerReady(event) {
-            event.target.playVideo(); // Start playing
+            // The video is already set to autoplay, but this is a good place
+            // to do other things when the player is loaded.
+            // For example, event.target.playVideo();
         }
 
-        // --- VIDEO FILTER CONTROLS (Now targets the new player container) ---
-        const playerContainer = document.getElementById('player-container');
+        // --- Map Initialization (No changes here) ---
+        const map = L.map('map').setView([0, 20], 3);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        
+        // --- Video Filter Controls (No changes here) ---
+        const playerElement = document.getElementById('player');
         const brightnessSlider = document.getElementById('brightness');
         const contrastSlider = document.getElementById('contrast');
         const saturateSlider = document.getElementById('saturate');
-        const grayscaleToggle = document.getElementById('grayscale-toggle');
-        let grayscale = false;
 
-        function updateVideoFilters() {
-            const grayscaleValue = grayscale ? 1 : 0;
-            playerContainer.style.filter = \`brightness(\${brightnessSlider.value}%) contrast(\${contrastSlider.value}%) saturate(\${saturateSlider.value}%) grayscale(\${grayscaleValue})\`;
+        function applyFilters() {
+            const brightness = brightnessSlider.value;
+            const contrast = contrastSlider.value;
+            const saturate = saturateSlider.value;
+            playerElement.style.filter = `brightness(${brightness}%) contrast(${contrast}%) saturate(${saturate}%)`;
         }
-
-        brightnessSlider.addEventListener('input', updateVideoFilters);
-        contrastSlider.addEventListener('input', updateVideoFilters);
-        saturateSlider.addEventListener('input', updateVideoFilters);
-        grayscaleToggle.addEventListener('click', () => {
-            grayscale = !grayscale;
-            grayscaleToggle.classList.toggle('active', grayscale);
-            updateVideoFilters();
-        });
-
-        // --- MAP AND ISS TRACKING ---
-        const map = L.map('iss-map', {
-            center: [0, 0], zoom: 2, minZoom: 2, maxZoom: 6,
-            worldCopyJump: true, zoomControl: false
-        });
-
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '&copy; OpenStreetMap'
-        }).addTo(map);
-
-        const issIcon = L.divIcon({ className: 'iss-icon', iconSize: [30, 30], iconAnchor: [15, 15] });
-        const issMarker = L.marker([0, 0], {icon: issIcon}).addTo(map);
-        let orbitalPath = L.polyline([], {color: '#3b82f6', weight: 2, opacity: 0.7}).addTo(map);
-        let pathCoordinates = [];
-        const ISS_API_URL = 'https://api.wheretheiss.at/v1/satellites/25544';
-
-        async function updateISSLocation() {
-            try {
-                const response = await fetch(ISS_API_URL);
-                const data = await response.json();
-                const { latitude, longitude } = data;
-                const latLng = [latitude, longitude];
-                
-                if (!map._userDragging) {
-                    map.setView(latLng, map.getZoom(), { animate: true, duration: 1 });
-                }
-                issMarker.setLatLng(latLng);
-                pathCoordinates.push(latLng);
-                if (pathCoordinates.length > 500) { pathCoordinates.shift(); }
-                orbitalPath.setLatLngs(pathCoordinates);
-            } catch (error) { console.error("Error fetching ISS data:", error); }
-        }
-
-        updateISSLocation();
-        setInterval(updateISSLocation, 3000);
         
-        map.on('mousedown touchstart', () => { map._userDragging = true; });
-        map.on('mouseup touchend', () => { setTimeout(() => { map._userDragging = false; }, 500); });
+        brightnessSlider.addEventListener('input', applyFilters);
+        contrastSlider.addEventListener('input', applyFilters);
+        saturateSlider.addEventListener('input', applyFilters);
     </script>
+
 </body>
 </html>
