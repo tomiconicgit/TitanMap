@@ -33,8 +33,8 @@
             width: 100%;
             height: 100%;
             border: none;
-            /* MODIFIED: 'contain' fits the video inside the container, adding black bars if needed */
-            object-fit: contain;
+            /* MODIFIED: 'cover' zooms the video to fill the space, cropping the sides */
+            object-fit: cover;
         }
 
         .map-container {
@@ -64,34 +64,17 @@
             text-align: center;
             font-size: 12px;
         }
-        .info-item {
-            flex: 1;
-        }
-        .info-item .label {
-            display: block;
-            font-size: 10px;
-            color: #aaa;
-            text-transform: uppercase;
-        }
-        .info-item .value {
-            font-size: 14px;
-            font-weight: bold;
-            color: #4dc3ff;
-        }
+        .info-item { flex: 1; }
+        .info-item .label { display: block; font-size: 10px; color: #aaa; text-transform: uppercase; }
+        .info-item .value { font-size: 14px; font-weight: bold; color: #4dc3ff; }
 
         @keyframes pulse {
             0% { transform: scale(1); filter: drop-shadow(0 0 2px #fff); }
             50% { transform: scale(1.1); filter: drop-shadow(0 0 8px #00bfff); }
             100% { transform: scale(1); filter: drop-shadow(0 0 2px #fff); }
         }
-        .iss-icon-wrapper {
-            animation: pulse 3s infinite ease-in-out;
-        }
-        .iss-icon-wrapper svg {
-            width: 48px;
-            height: 48px;
-            fill: #e0e0e0;
-        }
+        .iss-icon-wrapper { animation: pulse 3s infinite ease-in-out; }
+        .iss-icon-wrapper svg { width: 48px; height: 48px; fill: #e0e0e0; }
     </style>
 </head>
 <body>
@@ -122,18 +105,12 @@
     <script src="https://www.youtube.com/iframe_api"></script>
 
     <script>
-        // --- YouTube Player Setup ---
+        // --- YouTube Player Setup (Unchanged) ---
         let player;
         function onYouTubeIframeAPIReady() {
             player = new YT.Player('player', {
                 videoId: 'yf5cEJULZXk',
-                playerVars: {
-                    'playsinline': 1,
-                    'controls': 0,
-                    'autoplay': 1,
-                    'mute': 1, // This ensures the video starts muted
-                    'rel': 0
-                },
+                playerVars: { 'playsinline': 1, 'controls': 0, 'autoplay': 1, 'mute': 1, 'rel': 0 },
                 events: { 'onReady': (event) => { event.target.playVideo(); } }
             });
         }
@@ -148,9 +125,34 @@
 
         let trajectoryCoords = [];
         const trajectoryLine = L.polyline([], { color: '#00bfff', weight: 2, opacity: 0.8 }).addTo(map);
-
-        const SATELLITE_ID = 25544; // ISS Satellite ID
+        const SATELLITE_ID = 25544;
         
+        // --- NEW: Variables for smooth animation ---
+        let lastPosition = null;
+        let nextPosition = null;
+        let animationStartTime = 0;
+        const animationDuration = 5000; // Match the API update interval
+
+        // --- NEW: Animation loop function ---
+        function animateMarker() {
+            const now = performance.now();
+            const elapsed = now - animationStartTime;
+            const progress = Math.min(elapsed / animationDuration, 1);
+
+            if (lastPosition && nextPosition) {
+                const lat = lastPosition.lat + (nextPosition.lat - lastPosition.lat) * progress;
+                const lng = lastPosition.lng + (nextPosition.lng - lastPosition.lng) * progress;
+                
+                const newLatLng = [lat, lng];
+                issMarker.setLatLng(newLatLng);
+                map.panTo(newLatLng, { animate: false }); // Pan without Leaflet's animation
+            }
+
+            if (progress < 1) {
+                requestAnimationFrame(animateMarker); // Continue the loop
+            }
+        }
+
         async function fetchInitialTrajectory() {
             try {
                 const now = Math.floor(Date.now() / 1000);
@@ -158,34 +160,36 @@
                 for (let i = 0; i <= 20; i++) {
                     timestamps.push(now - (i * 60));
                 }
-                const timestampsString = timestamps.join(',');
-                const response = await fetch(`https://api.wheretheiss.at/v1/satellites/${SATELLITE_ID}/positions?timestamps=${timestampsString}`);
+                const response = await fetch(`https://api.wheretheiss.at/v1/satellites/${SATELLITE_ID}/positions?timestamps=${timestamps.join(',')}`);
                 const data = await response.json();
                 trajectoryCoords = data.map(pos => [pos.latitude, pos.longitude]).reverse();
                 trajectoryLine.setLatLngs(trajectoryCoords);
-            } catch (error) {
-                console.error("Error fetching initial trajectory:", error);
-            }
+            } catch (error) { console.error("Error fetching initial trajectory:", error); }
         }
 
+        // --- MODIFIED: Main data update function ---
         async function updateISSData() {
             try {
                 const response = await fetch(`https://api.wheretheiss.at/v1/satellites/${SATELLITE_ID}`);
                 const data = await response.json();
-                const { latitude, longitude, velocity, altitude } = data;
+                
+                // Set the start and end points for the animation
+                lastPosition = issMarker.getLatLng();
+                nextPosition = L.latLng(data.latitude, data.longitude);
+                animationStartTime = performance.now();
+                
+                // Start the animation loop
+                requestAnimationFrame(animateMarker);
 
-                const latLng = [latitude, longitude];
-                issMarker.setLatLng(latLng);
-                map.panTo(latLng, { animate: true, duration: 1.0 });
-
-                trajectoryCoords.push(latLng);
+                // Append new point to the trajectory line
+                trajectoryCoords.push([data.latitude, data.longitude]);
                 if (trajectoryCoords.length > 500) { trajectoryCoords.shift(); }
-                trajectoryLine.addLatLng(latLng);
+                trajectoryLine.addLatLng([data.latitude, data.longitude]);
 
-                document.getElementById('speed').textContent = velocity.toFixed(0);
-                document.getElementById('altitude').textContent = altitude.toFixed(0);
-
-                updateLocationName(latitude, longitude);
+                // Update info panel
+                document.getElementById('speed').textContent = data.velocity.toFixed(0);
+                document.getElementById('altitude').textContent = data.altitude.toFixed(0);
+                updateLocationName(data.latitude, data.longitude);
 
             } catch (error) { console.error("Error fetching ISS data:", error); }
         }
@@ -195,7 +199,6 @@
                 const geo_api_url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=3`;
                 const response = await fetch(geo_api_url);
                 const data = await response.json();
-                
                 let locationName = "Over an Ocean";
                 if (data.address) {
                     locationName = data.address.country || data.address.water || locationName;
@@ -204,9 +207,15 @@
             } catch (error) { document.getElementById('location').textContent = "N/A"; }
         }
 
-        fetchInitialTrajectory();
-        updateISSData();
-        setInterval(updateISSData, 5000);
+        async function initialize() {
+            await fetchInitialTrajectory();
+            await updateISSData(); // Get first "real" position
+            // Set the initial lastPosition to the current position to prevent a jump from [0,0]
+            lastPosition = issMarker.getLatLng();
+            setInterval(updateISSData, 5000);
+        }
+
+        initialize();
     </script>
 </body>
 </html>
