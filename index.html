@@ -2,30 +2,30 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ISS Live Feed</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Live ISS Tracker</title>
 
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
      crossorigin=""/>
     
     <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        html, body {
             margin: 0;
             padding: 0;
-            background-color: #f0f2f5;
-            display: flex;
-            flex-direction: column;
-            height: 100vh;
+            overflow: hidden;
+            height: 100%;
+            background-color: #0a0a0a;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            color: #fff;
         }
+
         .video-container {
             position: relative;
-            width: 100%;
-            padding-top: 56.25%; /* 16:9 Aspect Ratio */
+            width: 100vw;
+            height: 50vh;
             background-color: #000;
         }
-        /* This single rule now targets the div and the iframe that will be placed inside it */
         #player {
             position: absolute;
             top: 0;
@@ -33,26 +33,63 @@
             width: 100%;
             height: 100%;
             border: none;
+            object-fit: cover;
         }
-        .controls {
-            padding: 16px;
-            background-color: #fff;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .slider-group {
-            margin-bottom: 12px;
-        }
-        .slider-group label {
-            display: block;
-            margin-bottom: 4px;
-            color: #333;
-        }
-        .slider-group input[type="range"] {
-            width: 100%;
+
+        .map-container {
+            position: relative;
+            width: 100vw;
+            height: 50vh;
         }
         #map {
-            flex-grow: 1;
             width: 100%;
+            height: 100%;
+            background-color: #1a1a1a;
+        }
+
+        .info-panel {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            z-index: 1000;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 8px 0;
+            box-sizing: border-box;
+            border-top: 1px solid rgba(255, 255, 255, 0.2);
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            text-align: center;
+            font-size: 12px;
+        }
+        .info-item {
+            flex: 1;
+        }
+        .info-item .label {
+            display: block;
+            font-size: 10px;
+            color: #aaa;
+            text-transform: uppercase;
+        }
+        .info-item .value {
+            font-size: 14px;
+            font-weight: bold;
+            color: #4dc3ff;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); filter: drop-shadow(0 0 2px #fff); }
+            50% { transform: scale(1.1); filter: drop-shadow(0 0 8px #00bfff); }
+            100% { transform: scale(1); filter: drop-shadow(0 0 2px #fff); }
+        }
+        .iss-icon-wrapper {
+            animation: pulse 3s infinite ease-in-out;
+        }
+        .iss-icon-wrapper svg {
+            width: 48px;
+            height: 48px;
+            fill: #e0e0e0;
         }
     </style>
 </head>
@@ -62,83 +99,119 @@
         <div id="player"></div>
     </div>
 
-    <div class="controls">
-        <div class="slider-group">
-            <label for="brightness">Brightness</label>
-            <input type="range" id="brightness" name="brightness" min="0" max="200" value="100">
-        </div>
-        <div class="slider-group">
-            <label for="contrast">Contrast</label>
-            <input type="range" id="contrast" name="contrast" min="0" max="200" value="100">
-        </div>
-        <div class="slider-group">
-            <label for="saturate">Saturate</label>
-            <input type="range" id="saturate" name="saturate" min="0" max="200" value="100">
+    <div class="map-container">
+        <div id="map"></div>
+        <div class="info-panel">
+            <div class="info-item">
+                <span class="label">Speed</span>
+                <span class="value" id="speed">...</span> km/h
+            </div>
+            <div class="info-item">
+                <span class="label">Altitude</span>
+                <span class="value" id="altitude">...</span> km
+            </div>
+            <div class="info-item">
+                <span class="label">Location</span>
+                <span class="value" id="location">...</span>
+            </div>
         </div>
     </div>
 
-    <div id="map"></div>
-
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-     integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-     crossorigin=""></script>
-    
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
     <script src="https://www.youtube.com/iframe_api"></script>
 
     <script>
-        // --- CHANGE #3: YouTube Player API Initialization ---
-        let player; // This variable will hold our player object
-
-        // This function is automatically called by the YouTube API script when it's ready
+        // --- YouTube Player Setup (Unchanged) ---
+        let player;
         function onYouTubeIframeAPIReady() {
             player = new YT.Player('player', {
-                videoId: 'yf5cEJULZXk', // The ID of the video
+                videoId: 'yf5cEJULZXk',
                 playerVars: {
-                    'playsinline': 1,   // This is the crucial parameter for iOS
-                    'autoplay': 1,      // Autoplay the video
-                    'mute': 1,          // Muting is required for autoplay
-                    'controls': 1,      // Show player controls
-                    'rel': 0,           // Do not show related videos at the end
-                    'modestbranding': 1 // Reduce the YouTube logo
+                    'playsinline': 1, 'controls': 0, 'autoplay': 1, 'mute': 1, 'rel': 0
                 },
-                events: {
-                    'onReady': onPlayerReady
-                }
+                events: { 'onReady': (event) => { event.target.playVideo(); } }
             });
         }
 
-        // The API will call this function when the video player is ready.
-        function onPlayerReady(event) {
-            // The video is already set to autoplay, but this is a good place
-            // to do other things when the player is loaded.
-            // For example, event.target.playVideo();
+        // --- Leaflet Map & ISS Tracker Setup ---
+        // MODIFIED: Added attributionControl: false to remove the Leaflet banner
+        const map = L.map('map', { zoomControl: false, attributionControl: false }).setView([0, 0], 3);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 }).addTo(map);
+
+        const issSVG = `<div class="iss-icon-wrapper"><svg viewBox="0 0 100 66" xmlns="http://www.w3.org/2000/svg"><g><path d="M72.5,25.5 L72.5,10.5 L60.5,10.5 L60.5,25.5 L72.5,25.5 Z M39.5,25.5 L39.5,10.5 L27.5,10.5 L27.5,25.5 L39.5,25.5 Z"/><path d="M72.5,55.5 L72.5,40.5 L60.5,40.5 L60.5,55.5 L72.5,55.5 Z M39.5,55.5 L39.5,40.5 L27.5,40.5 L27.5,55.5 L39.5,55.5 Z"/><rect x="0.5" y="28.5" width="99" height="9"/><rect x="42.5" y="18.5" width="15" height="29"/></g></svg></div>`;
+        const issIcon = L.divIcon({ html: issSVG, className: '', iconSize: [48, 48], iconAnchor: [24, 24] });
+        const issMarker = L.marker([0, 0], { icon: issIcon }).addTo(map);
+
+        let trajectoryCoords = [];
+        const trajectoryLine = L.polyline([], { color: '#00bfff', weight: 2, opacity: 0.8 }).addTo(map);
+
+        const SATELLITE_ID = 25544; // ISS Satellite ID
+        
+        // --- NEW: Fetch historical trajectory on load ---
+        async function fetchInitialTrajectory() {
+            try {
+                // 1. Generate timestamps for the last 20 minutes (one per minute)
+                const now = Math.floor(Date.now() / 1000);
+                let timestamps = [];
+                for (let i = 0; i <= 20; i++) {
+                    timestamps.push(now - (i * 60));
+                }
+                const timestampsString = timestamps.join(',');
+
+                // 2. Fetch the historical positions
+                const response = await fetch(`https://api.wheretheiss.at/v1/satellites/${SATELLITE_ID}/positions?timestamps=${timestampsString}`);
+                const data = await response.json();
+
+                // 3. Populate the trajectory array and draw the initial line
+                trajectoryCoords = data.map(pos => [pos.latitude, pos.longitude]).reverse(); // Reverse to draw from past to present
+                trajectoryLine.setLatLngs(trajectoryCoords);
+            } catch (error) {
+                console.error("Error fetching initial trajectory:", error);
+            }
         }
 
-        // --- Map Initialization (No changes here) ---
-        const map = L.map('map').setView([0, 20], 3);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            maxZoom: 19,
-            attribution: '© OpenStreetMap contributors'
-        }).addTo(map);
+        // Function to fetch the current live data
+        async function updateISSData() {
+            try {
+                const response = await fetch(`https://api.wheretheiss.at/v1/satellites/${SATELLITE_ID}`);
+                const data = await response.json();
+                const { latitude, longitude, velocity, altitude } = data;
 
-        
-        // --- Video Filter Controls (No changes here) ---
-        const playerElement = document.getElementById('player');
-        const brightnessSlider = document.getElementById('brightness');
-        const contrastSlider = document.getElementById('contrast');
-        const saturateSlider = document.getElementById('saturate');
+                const latLng = [latitude, longitude];
+                issMarker.setLatLng(latLng);
+                map.panTo(latLng, { animate: true, duration: 1.0 });
 
-        function applyFilters() {
-            const brightness = brightnessSlider.value;
-            const contrast = contrastSlider.value;
-            const saturate = saturateSlider.value;
-            playerElement.style.filter = `brightness(${brightness}%) contrast(${contrast}%) saturate(${saturate}%)`;
+                // Append new point to the existing trajectory line
+                trajectoryCoords.push(latLng);
+                if (trajectoryCoords.length > 500) { trajectoryCoords.shift(); }
+                trajectoryLine.addLatLng(latLng);
+
+                document.getElementById('speed').textContent = velocity.toFixed(0);
+                document.getElementById('altitude').textContent = altitude.toFixed(0);
+
+                updateLocationName(latitude, longitude);
+
+            } catch (error) { console.error("Error fetching ISS data:", error); }
         }
         
-        brightnessSlider.addEventListener('input', applyFilters);
-        contrastSlider.addEventListener('input', applyFilters);
-        saturateSlider.addEventListener('input', applyFilters);
+        async function updateLocationName(lat, lon) {
+             try {
+                const geo_api_url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=3`;
+                const response = await fetch(geo_api_url);
+                const data = await response.json();
+                
+                let locationName = "Over an Ocean";
+                if (data.address) {
+                    locationName = data.address.country || data.address.water || locationName;
+                }
+                document.getElementById('location').textContent = locationName;
+            } catch (error) { document.getElementById('location').textContent = "N/A"; }
+        }
+
+        // --- Initialize and start updates ---
+        fetchInitialTrajectory(); // Draw the historical line first
+        updateISSData(); // Get the very latest position immediately
+        setInterval(updateISSData, 5000); // Then update every 5 seconds
     </script>
-
 </body>
 </html>
