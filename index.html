@@ -69,7 +69,7 @@
             container.appendChild(renderer.domElement);
 
             // --- CORRECTED: Lights now use your specified settings ---
-            const ambientLight = new THREE.AmbientLight(0xffffff, 1.19);
+            const ambientLight = new THREE.AmbientLight(0x858585, 1.19);
             scene.add(ambientLight);
             const directionalLight = new THREE.DirectionalLight(0x999999, 2.92);
             directionalLight.position.set(5, 3, 5);
