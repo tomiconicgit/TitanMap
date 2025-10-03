@@ -2,331 +2,205 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
-    
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="iOS UI Test">
-    
-    <title>iPhone PWA UI Tester</title>
-
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#0b1021">
+    <title>ISS Live Tracker</title>
+    <link rel="manifest" href="data:application/json;base64,ewogICJuYW1lIjogIklTUyBMaXZlIFRyYWNrZXIiLAogICJzaG9ydF9uYW1lIjogIklTUyBUcmFja2VyIiwKICAiaWNvbnMiOiBbCiAgICB7CiAgICAgICJzcmMiOiAiaHR0cHM6Ly93d3cudzMub3JnLzIwMDAvc3ZnL2V4YW1wbGVzL2J1dHRvbnMvaWNvbnMvaWNvbi1ibHVlLnN2ZyIsCiAgICAgICJzaXplcyI6ICIxOTJ4MTkyIiwKICAgICAgInR5cGUiOiAiaW1hZ2Uvc3ZnK3htbCIKICAgIH0sCiAgICB7CiAgICAgICJzcmMiOiAiaHR0cHM6Ly93d3cudzMub3JnLzIwMDAvc3ZnL2V4YW1wbGVzL2J1dHRvbnMvaWNvbnMvaWNvbi1ibHVlLnN2ZyIsCiAgICAgICJzaXplcyI6ICI1MTJ4NTEyIiwKICAgICAgInR5cGUiOiAiaW1hZ2Uvc3ZnK3htbCIKICAgIH0KICBdLAogICJzdGFydF91cmwiOiAiLiIsCiAgImRpc3BsYXkiOiAic3RhbmRhbG9uZSIKICB9">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
     <style>
         :root {
-            --system-blue: #007aff;
-            --system-gray: #f2f2f7;
-            --system-text: #000;
-            --system-background: #fff;
-            --border-color: #c6c6c8;
+            --primary-bg: #0b1021;
+            --secondary-bg: #1c233a;
+            --accent-color: #3b82f6;
+            --text-color: #e2e8f0;
+            --border-color: #334155;
+            --slider-track: #475569;
         }
-
-        @media (prefers-color-scheme: dark) {
-            :root {
-                --system-gray: #1c1c1e;
-                --system-text: #fff;
-                --system-background: #000;
-                --border-color: #38383a;
-            }
-        }
-
-        body {
+        html, body {
+            margin: 0; padding: 0; height: 100%;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background-color: var(--system-gray);
-            color: var(--system-text);
-            margin: 0;
-            padding: 20px;
-            padding-top: env(safe-area-inset-top, 20px);
-            padding-bottom: env(safe-area-inset-bottom, 20px);
-            -webkit-font-smoothing: antialiased;
+            background-color: var(--primary-bg); color: var(--text-color);
+            overflow: hidden; display: flex; flex-direction: column;
         }
-
-        main {
-            max-width: 600px;
-            margin: 0 auto;
+        .video-container {
+            position: relative; width: 100%;
+            padding-top: 56.25%; /* 16:9 Aspect Ratio */
+            background-color: #000;
         }
-
-        h1, h2 {
-            padding-bottom: 5px;
-            border-bottom: 1px solid var(--border-color);
-        }
-
-        h1 { font-size: 1.8em; }
-        h2 { font-size: 1.4em; margin-top: 30px;}
-
-        p, .note {
-            font-size: 0.9em;
-            line-height: 1.5;
-            color: #8e8e93;
-        }
-
-        .button-group {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-            margin-top: 15px;
-        }
-
-        button, .button-like {
-            font-size: 1em;
-            font-weight: 500;
-            padding: 12px 15px;
+        #player-container {
+            position: absolute; top: 0; left: 0;
+            width: 100%; height: 100%;
             border: none;
-            background-color: var(--system-background);
-            color: var(--system-blue);
-            cursor: pointer;
-            text-align: left;
-            border-radius: 10px;
-            width: 100%;
-            transition: background-color 0.2s ease;
+            transition: filter 0.2s ease-in-out;
         }
-
-        button:active {
-            background-color: #e5e5ea;
+        .controls-container {
+            padding: 16px; background-color: var(--secondary-bg);
+            border-top: 1px solid var(--border-color); flex-shrink: 0;
         }
-
-        @media (prefers-color-scheme: dark) {
-            button:active {
-                background-color: #2c2c2e;
-            }
+        .control-group {
+            display: flex; align-items: center; margin-bottom: 12px;
         }
-
-        input[type="file"] { display: none; }
-        
-        /* Custom HTML Modal Styling to mimic iOS */
-        dialog {
-            border: none;
-            border-radius: 14px;
-            box-shadow: 0 0 20px rgba(0,0,0,0.2);
-            padding: 0;
-            width: 270px;
-            background-color: rgba(242, 242, 247, 0.8);
-            backdrop-filter: saturate(180%) blur(20px);
-            -webkit-backdrop-filter: saturate(180%) blur(20px);
+        .control-group label { min-width: 80px; font-size: 0.9rem; }
+        input[type="range"] {
+            -webkit-appearance: none; appearance: none;
+            width: 100%; height: 6px; background: var(--slider-track);
+            border-radius: 3px; outline: none; opacity: 0.8; transition: opacity .2s;
         }
-        
-        dialog::backdrop {
-            background-color: rgba(0, 0, 0, 0.4);
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none; appearance: none;
+            width: 20px; height: 20px; background: var(--accent-color);
+            cursor: pointer; border-radius: 50%;
         }
-
-        .modal-content {
-            padding: 20px;
-            text-align: center;
+        input[type="range"]::-moz-range-thumb {
+            width: 20px; height: 20px; background: var(--accent-color);
+            cursor: pointer; border-radius: 50%;
         }
-
-        .modal-content h3 {
-            margin: 0 0 5px 0;
-            font-size: 1.1em;
-            font-weight: 600;
-            color: var(--system-text);
+        .toggle-container { display: flex; justify-content: flex-end; padding-right: 8px; }
+        .toggle-button {
+            background-color: var(--slider-track); color: var(--text-color);
+            border: 1px solid var(--border-color); padding: 8px 16px;
+            border-radius: 20px; cursor: pointer; font-size: 0.9rem;
         }
-
-        .modal-content p {
-            margin: 0 0 20px 0;
-            font-size: 0.9em;
-            color: var(--system-text);
+        .toggle-button.active { background-color: var(--accent-color); font-weight: bold; }
+        .map-container { flex-grow: 1; background-color: var(--primary-bg); min-height: 200px; }
+        #iss-map { width: 100%; height: 100%; }
+        .iss-icon {
+            background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="30" height="30"><path fill="%233b82f6" d="M89.3,50.8c-2.3-2.1-4.9-3.8-7.7-5.2c-1-0.5-2.1-1-3.1-1.4c-0.2-0.1-0.4-0.2-0.6-0.3c-2.1-0.9-4.3-1.6-6.6-2.2 c-0.2,0-0.3-0.1-0.5-0.1c-1.2-0.3-2.5-0.6-3.7-0.8c-0.2,0-0.4,0-0.6-0.1c-1.1-0.2-2.2-0.3-3.3-0.5c-0.3,0-0.5-0.1-0.8-0.1 c-0.9-0.1-1.9-0.2-2.8-0.3c-0.4,0-0.7-0.1-1.1-0.1c-0.7-0.1-1.5-0.1-2.2-0.2c-0.6,0-1.1-0.1-1.7-0.1c-0.3,0-0.7,0-1,0 c-1.2,0-2.3,0-3.5,0.1c-1.2,0.1-2.5,0.3-3.7,0.5c-1.1,0.2-2.2,0.4-3.3,0.7c-1.1,0.3-2.1,0.6-3.2,1c-2.1,0.7-4.1,1.6-6.1,2.6 c-1,0.5-1.9,1.1-2.8,1.7c-0.1,0.1-0.3,0.2-0.4,0.3c-0.8,0.5-1.6,1.1-2.4,1.7c-1.5,1.2-2.9,2.5-4.2,3.9c-3.1,3.4-5.3,7.5-6.5,12 c-0.1,0.3-0.1,0.6-0.2,0.9c-0.9,3.7-1.2,7.5-0.8,11.3c0.1,1,0.3,2,0.5,3c0.3,1.4,0.7,2.7,1.2,4c1.1,3,2.8,5.8,4.9,8.2 c4.3,4.8,10.2,7.7,16.5,8.1c0.3,0,0.6,0,0.9,0c4.1,0,8.1-0.8,11.9-2.3c1.9-0.8,3.7-1.7,5.5-2.8c0.1-0.1,0.2-0.1,0.2-0.2 c3.4-2.2,6.4-5,8.8-8.3c4.8-6.5,7.3-14.4,7.2-22.6c0-0.1,0-0.2,0-0.3c-0.1-3.2-0.8-6.3-2-9.3C90.2,51.8,89.8,51.3,89.3,50.8z M50,67.5c-9.7,0-17.5-7.8-17.5-17.5S40.3,32.5,50,32.5S67.5,40.3,67.5,50S59.7,67.5,50,67.5z"/></svg>');
+            background-size: contain; border-radius: 50%;
+            box-shadow: 0 0 10px #3b82f6, 0 0 20px #3b82f6; animation: pulse 2s infinite;
         }
-
-        .modal-actions {
-            display: flex;
-            border-top: 1px solid rgba(60, 60, 67, 0.29);
-        }
-
-        .modal-actions button {
-            flex: 1;
-            background: none;
-            border: none;
-            padding: 12px;
-            font-size: 1.05em;
-            color: var(--system-blue);
-            cursor: pointer;
-        }
-
-        .modal-actions button:first-child {
-             border-right: 1px solid rgba(60, 60, 67, 0.29);
+        @keyframes pulse {
+            0% { transform: scale(0.9); box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 10px 10px rgba(59, 130, 246, 0); }
+            100% { transform: scale(0.9); box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
         }
     </style>
 </head>
 <body>
-
-    <main>
-        <h1>iPhone PWA UI Tester</h1>
-        <p>Use these buttons to test native iOS UI elements that can be triggered from a web app. For the best experience, use Safari's "Add to Home Screen" feature.</p>
-
-        <h2>Basic Dialogs</h2>
-        <p>These are simple, but they block user interaction on the page until dismissed.</p>
-        <div class="button-group">
-            <button id="alertBtn">Test Alert</button>
-            <button id="confirmBtn">Test Confirm</button>
-            <button id="promptBtn">Test Prompt</button>
-        </div>
-
-        <h2>Native Sheets & Pickers</h2>
-        <p class="note">These APIs require a secure context (HTTPS) and often a user gesture (like a tap).</p>
-        <div class="button-group">
-            <button id="shareBtn">Trigger Share Sheet</button>
-            <button id="contactsBtn">Open Contact Picker</button>
-            <label for="file-picker" class="button-like">Open File Picker</label>
-            <input type="file" id="file-picker">
-            <label for="camera-picker" class="button-like">Take a Photo (camera)</label>
-            <input type="file" accept="image/*" capture="environment" id="camera-picker">
-        </div>
-
-        <h2>Native Input Controls</h2>
-        <p>Tapping these input fields will bring up the native iOS UI for that type.</p>
-        <div class="button-group" style="background-color: var(--system-background); padding: 15px; border-radius: 10px;">
-             Date: <input type="date" style="width: 100%; margin-bottom: 10px;">
-             Time: <input type="time" style="width: 100%; margin-bottom: 10px;">
-             Date & Time: <input type="datetime-local" style="width: 100%; margin-bottom: 10px;">
-             Color: <input type="color" value="#007aff" style="width: 100%; margin-bottom: 10px; height: 40px;">
-             Range: <input type="range" style="width: 100%;">
-        </div>
-        
-        <h2>Device Integrations</h2>
-        <p class="note">Permissions will be requested for some of these features.</p>
-        <div class="button-group">
-            <button id="vibrateBtn">Test Haptic Feedback (Vibrate)</button>
-            <button id="notificationBtn">Request & Send Notification</button>
-            <button id="fullscreenBtn">Enter Fullscreen</button>
-        </div>
-
-        <h2>Modern HTML `<dialog>` Modal</h2>
-        <p>This is not a native iOS modal, but the modern web standard. It is highly stylable and non-blocking. This one is styled to look like an iOS alert.</p>
-        <div class="button-group">
-            <button id="showModalBtn">Show Custom HTML Modal</button>
-        </div>
-    </main>
     
-    <dialog id="customModal">
-        <div class="modal-content">
-            <h3>Custom Modal</h3>
-            <p>This is a &lt;dialog&gt; element, styled to look native. It's more flexible than alert().</p>
-        </div>
-        <div class="modal-actions">
-            <button id="cancelModalBtn">Cancel</button>
-            <button id="okModalBtn">OK</button>
-        </div>
-    </dialog>
+    <div class="video-container">
+        <div id="player-container"></div>
+    </div>
 
+    <div class="controls-container">
+        <div class="control-group">
+            <label for="brightness">Brightness</label>
+            <input type="range" id="brightness" min="0" max="200" value="100">
+        </div>
+        <div class="control-group">
+            <label for="contrast">Contrast</label>
+            <input type="range" id="contrast" min="0" max="200" value="100">
+        </div>
+        <div class="control-group">
+            <label for="saturate">Saturate</label>
+            <input type="range" id="saturate" min="0" max="200" value="100">
+        </div>
+        <div class="toggle-container">
+            <button id="grayscale-toggle" class="toggle-button">Grayscale</button>
+        </div>
+    </div>
+
+    <div id="iss-map" class="map-container"></div>
+    
+    <script src="https://www.youtube.com/iframe_api"></script>
 
     <script>
-        // --- Basic Dialogs ---
-        document.getElementById('alertBtn').addEventListener('click', () => {
-            alert('This is a native alert dialog.');
-        });
+        // --- SERVICE WORKER REGISTRATION ---
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('data:application/javascript;base64,' + btoa(`
+                const CACHE_NAME = 'iss-tracker-cache-v1'; self.addEventListener('install', e => e.waitUntil(caches.open(CACHE_NAME).then(c => c.add('/'))));
+                self.addEventListener('fetch', e => e.respondWith(caches.match(e.request).then(r => r || fetch(e.request))));
+            `)).catch(error => console.log('SW registration failed:', error));
+        }
 
-        document.getElementById('confirmBtn').addEventListener('click', () => {
-            const result = confirm('This is a native confirm dialog.\nDid you press OK?');
-            alert(`You chose: ${result}`);
-        });
-
-        document.getElementById('promptBtn').addEventListener('click', () => {
-            const result = prompt('This is a native prompt.\nPlease enter your name:', 'Gemini');
-            if (result !== null) {
-                alert(`Hello, ${result}!`);
-            } else {
-                alert('You cancelled the prompt.');
-            }
-        });
-
-        // --- Native Sheets & Pickers ---
-        document.getElementById('shareBtn').addEventListener('click', async () => {
-            if (navigator.share) {
-                try {
-                    await navigator.share({
-                        title: 'PWA Test',
-                        text: 'Check out this awesome PWA UI tester!',
-                        url: window.location.href,
-                    });
-                    console.log('Content shared successfully!');
-                } catch (error) {
-                    alert(`Sharing failed: ${error}`);
+        // --- YOUTUBE PLAYER API SETUP ---
+        let player;
+        // This function is called automatically by the YouTube script
+        function onYouTubeIframeAPIReady() {
+            player = new YT.Player('player-container', {
+                height: '100%',
+                width: '100%',
+                videoId: 'yf5cEJULZXk',
+                playerVars: {
+                    'autoplay': 1,       // Autoplay the video
+                    'mute': 1,           // Mute by default
+                    'controls': 0,       // Hide player controls
+                    'showinfo': 0,       // Hide video title
+                    'modestbranding': 1, // Remove YouTube logo
+                    'playsinline': 1,    // **This is the key for embedded playback**
+                    'rel': 0             // Do not show related videos
+                },
+                events: {
+                    'onReady': onPlayerReady
                 }
-            } else {
-                alert('The Web Share API is not supported in this browser.');
-            }
+            });
+        }
+        // The API will call this function when the video player is ready.
+        function onPlayerReady(event) {
+            event.target.playVideo(); // Start playing
+        }
+
+        // --- VIDEO FILTER CONTROLS (Now targets the new player container) ---
+        const playerContainer = document.getElementById('player-container');
+        const brightnessSlider = document.getElementById('brightness');
+        const contrastSlider = document.getElementById('contrast');
+        const saturateSlider = document.getElementById('saturate');
+        const grayscaleToggle = document.getElementById('grayscale-toggle');
+        let grayscale = false;
+
+        function updateVideoFilters() {
+            const grayscaleValue = grayscale ? 1 : 0;
+            playerContainer.style.filter = \`brightness(\${brightnessSlider.value}%) contrast(\${contrastSlider.value}%) saturate(\${saturateSlider.value}%) grayscale(\${grayscaleValue})\`;
+        }
+
+        brightnessSlider.addEventListener('input', updateVideoFilters);
+        contrastSlider.addEventListener('input', updateVideoFilters);
+        saturateSlider.addEventListener('input', updateVideoFilters);
+        grayscaleToggle.addEventListener('click', () => {
+            grayscale = !grayscale;
+            grayscaleToggle.classList.toggle('active', grayscale);
+            updateVideoFilters();
         });
 
-        document.getElementById('contactsBtn').addEventListener('click', async () => {
-            if ('contacts' in navigator && 'select' in navigator.contacts) {
-                try {
-                    const contacts = await navigator.contacts.select(['name', 'email', 'tel'], { multiple: false });
-                    if (contacts.length > 0) {
-                        const contact = contacts[0];
-                        let info = `Selected Contact:\nName: ${contact.name.join(', ')}`;
-                        if(contact.email.length > 0) info += `\nEmail: ${contact.email[0]}`;
-                        if(contact.tel.length > 0) info += `\nTel: ${contact.tel[0]}`;
-                        alert(info);
-                    }
-                } catch (error) {
-                    alert(`Could not access contacts: ${error}`);
+        // --- MAP AND ISS TRACKING ---
+        const map = L.map('iss-map', {
+            center: [0, 0], zoom: 2, minZoom: 2, maxZoom: 6,
+            worldCopyJump: true, zoomControl: false
+        });
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap'
+        }).addTo(map);
+
+        const issIcon = L.divIcon({ className: 'iss-icon', iconSize: [30, 30], iconAnchor: [15, 15] });
+        const issMarker = L.marker([0, 0], {icon: issIcon}).addTo(map);
+        let orbitalPath = L.polyline([], {color: '#3b82f6', weight: 2, opacity: 0.7}).addTo(map);
+        let pathCoordinates = [];
+        const ISS_API_URL = 'https://api.wheretheiss.at/v1/satellites/25544';
+
+        async function updateISSLocation() {
+            try {
+                const response = await fetch(ISS_API_URL);
+                const data = await response.json();
+                const { latitude, longitude } = data;
+                const latLng = [latitude, longitude];
+                
+                if (!map._userDragging) {
+                    map.setView(latLng, map.getZoom(), { animate: true, duration: 1 });
                 }
-            } else {
-                alert('The Contact Picker API is not available.\n(Requires HTTPS and is an experimental feature)');
-            }
-        });
+                issMarker.setLatLng(latLng);
+                pathCoordinates.push(latLng);
+                if (pathCoordinates.length > 500) { pathCoordinates.shift(); }
+                orbitalPath.setLatLngs(pathCoordinates);
+            } catch (error) { console.error("Error fetching ISS data:", error); }
+        }
+
+        updateISSLocation();
+        setInterval(updateISSLocation, 3000);
         
-        document.getElementById('file-picker').addEventListener('change', (event) => {
-            if(event.target.files.length > 0) {
-                alert(`You selected a file: ${event.target.files[0].name}`);
-            }
-        });
-
-        document.getElementById('camera-picker').addEventListener('change', (event) => {
-            if(event.target.files.length > 0) {
-                alert(`You captured an image: ${event.target.files[0].name}`);
-            }
-        });
-
-        // --- Device Integrations ---
-        document.getElementById('vibrateBtn').addEventListener('click', () => {
-            if ('vibrate' in navigator) {
-                // Vibrate for 200ms
-                navigator.vibrate(200);
-            } else {
-                alert('The Vibration API is not supported.');
-            }
-        });
-        
-        document.getElementById('notificationBtn').addEventListener('click', () => {
-             if (!('Notification' in window)) {
-                alert('This browser does not support desktop notification');
-            } else if (Notification.permission === 'granted') {
-                new Notification('PWA Test!', { body: 'This is a native notification.' });
-            } else if (Notification.permission !== 'denied') {
-                Notification.requestPermission().then((permission) => {
-                    if (permission === 'granted') {
-                        new Notification('PWA Test!', { body: 'This is a native notification.' });
-                    }
-                });
-            } else {
-                alert('Notification permission has been denied. You need to enable it in your device settings.');
-            }
-        });
-
-        document.getElementById('fullscreenBtn').addEventListener('click', () => {
-            if (!document.fullscreenElement) {
-                document.documentElement.requestFullscreen().catch(err => {
-                    alert(`Error attempting to enable full-screen mode: ${err.message} (${err.name})`);
-                });
-            } else {
-                document.exitFullscreen();
-            }
-        });
-        
-        // --- Custom HTML Modal ---
-        const modal = document.getElementById('customModal');
-        document.getElementById('showModalBtn').addEventListener('click', () => {
-            modal.showModal();
-        });
-        document.getElementById('okModalBtn').addEventListener('click', () => {
-            modal.close('ok');
-        });
-        document.getElementById('cancelModalBtn').addEventListener('click', () => {
-            modal.close('cancel');
-        });
-        modal.addEventListener('close', () => {
-            console.log(`Modal closed with value: ${modal.returnValue}`);
-        });
-
+        map.on('mousedown touchstart', () => { map._userDragging = true; });
+        map.on('mouseup touchend', () => { setTimeout(() => { map._userDragging = false; }, 500); });
     </script>
 </body>
 </html>
