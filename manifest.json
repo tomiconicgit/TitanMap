@@ -1,0 +1,21 @@
+{
+  "name": "Live ISS Tracker",
+  "short_name": "ISS Tracker",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#0a0a0a",
+  "theme_color": "#0a0a0a",
+  "description": "A live ISS tracker with video feed and map.",
+  "icons": [
+    {
+      "src": "https://www.gstatic.com/android/keyboard/emojikit/20181001/u1f680.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://www.gstatic.com/android/keyboard/emojikit/20181001/u1f680.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
